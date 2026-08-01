@@ -240,8 +240,54 @@ case 'reminders':
     break;
 
 case 'avetmiss':
-    render('avetmiss', [], 'AVETMISS Reporting');
+    require __DIR__ . '/../lib/avetmiss.php';
+    // period selection: default current calendar year
+    $year = (int)($_GET['year'] ?? 2026);
+    $q    = $_GET['q'] ?? 'full';
+    $ranges = [
+        'full' => ["$year-01-01", "$year-12-31", "$year — Full year"],
+        'q1'   => ["$year-01-01", "$year-03-31", "$year — Q1 (Jan–Mar)"],
+        'q2'   => ["$year-04-01", "$year-06-30", "$year — Q2 (Apr–Jun)"],
+        'q3'   => ["$year-07-01", "$year-09-30", "$year — Q3 (Jul–Sep)"],
+        'q4'   => ["$year-10-01", "$year-12-31", "$year — Q4 (Oct–Dec)"],
+    ];
+    [$from,$to,$label] = $ranges[$q] ?? $ranges['full'];
+    $files   = avet_build_files($pdo, $from, $to);
+    $summary = avet_summary($files);
+    render('avetmiss', compact('summary','year','q','label','from','to'), 'AVETMISS Reporting');
     break;
+
+case 'avetmiss_export':
+    require __DIR__ . '/../lib/avetmiss.php';
+    $year = (int)($_GET['year'] ?? 2026);
+    $q    = $_GET['q'] ?? 'full';
+    $ranges = [
+        'full' => ["$year-01-01", "$year-12-31"], 'q1' => ["$year-01-01", "$year-03-31"],
+        'q2'   => ["$year-04-01", "$year-06-30"], 'q3' => ["$year-07-01", "$year-09-30"],
+        'q4'   => ["$year-10-01", "$year-12-31"],
+    ];
+    [$from,$to] = $ranges[$q] ?? $ranges['full'];
+    $path = avet_build_zip($pdo, $from, $to);
+    header('Content-Type: application/zip');
+    header('Content-Disposition: attachment; filename="'.basename($path).'"');
+    header('Content-Length: '.filesize($path));
+    readfile($path); exit;
+
+case 'avetmiss_preview':
+    require __DIR__ . '/../lib/avetmiss.php';
+    $year = (int)($_GET['year'] ?? 2026);
+    $q    = $_GET['q'] ?? 'full';
+    $file = preg_replace('/[^A-Z0-9.]/','',$_GET['file'] ?? 'NAT00120.txt');
+    $ranges = [
+        'full' => ["$year-01-01", "$year-12-31"], 'q1' => ["$year-01-01", "$year-03-31"],
+        'q2'   => ["$year-04-01", "$year-06-30"], 'q3' => ["$year-07-01", "$year-09-30"],
+        'q4'   => ["$year-10-01", "$year-12-31"],
+    ];
+    [$from,$to] = $ranges[$q] ?? $ranges['full'];
+    $files = avet_build_files($pdo, $from, $to);
+    header('Content-Type: text/plain; charset=utf-8');
+    echo $files[$file] ?? '';
+    exit;
 
 default:
     http_response_code(404); echo 'Page not found';
