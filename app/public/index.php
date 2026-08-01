@@ -101,6 +101,21 @@ case 'schedules':
     render('schedules', compact('rows'), 'Schedules');
     break;
 
+case 'pipeline':
+    $sid = (int)($_GET['schedule_id'] ?? 0);
+    $sc = $pdo->prepare("SELECT sc.*, p.title plan_title, co.code course_code, co.title course_title, l.name location
+        FROM schedules sc JOIN plans p ON p.id=sc.plan_id JOIN courses co ON co.id=p.course_id
+        LEFT JOIN locations l ON l.id=sc.location_id WHERE sc.id=?");
+    $sc->execute([$sid]); $schedule = $sc->fetch();
+    if (!$schedule) { http_response_code(404); echo 'Schedule not found'; break; }
+    $st = $pdo->prepare("
+        SELECT e.*, s.first_name, s.last_name, s.usi_number, s.email
+        FROM enrolments e JOIN students s ON s.id=e.student_id
+        WHERE e.schedule_id=? ORDER BY s.last_name");
+    $st->execute([$sid]); $rows = $st->fetchAll();
+    render('pipeline', compact('schedule','rows'), 'Class pipeline');
+    break;
+
 case 'courses':
     $rows = $pdo->query("
         SELECT co.*, (SELECT COUNT(*) FROM plans p WHERE p.course_id=co.id) plans,

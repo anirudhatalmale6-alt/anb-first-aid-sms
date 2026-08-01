@@ -70,6 +70,10 @@ function db_migrate(PDO $p): void {
         schedule_id INTEGER, location_id INTEGER, start_date TEXT, end_date TEXT,
         status TEXT NOT NULL DEFAULT 'enrolled',
         amount_due REAL DEFAULT 0, amount_paid REAL DEFAULT 0, payment_status TEXT DEFAULT 'unpaid',
+        -- readiness pipeline flags (0/1)
+        online_complete INTEGER DEFAULT 0, id_confirmed INTEGER DEFAULT 0,
+        attendance_marked INTEGER DEFAULT 0, tasks_satisfactory INTEGER DEFAULT 0,
+        avetmiss_complete INTEGER DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now')),
         FOREIGN KEY(student_id) REFERENCES students(id), FOREIGN KEY(course_id) REFERENCES courses(id),
         FOREIGN KEY(plan_id) REFERENCES plans(id), FOREIGN KEY(schedule_id) REFERENCES schedules(id)
@@ -146,12 +150,14 @@ function db_seed(PDO $p): void {
         ['Mr','Daniel','James','Okafor','1990-01-09','M','3000000004',1,'daniel.o@example.com','0400777888','9','Park Rd','St. Marys','NSW','2760'],
         ['Ms','Priya','','Sharma','1998-05-27','F',null,0,'priya.s@example.com','0400999000','2','Elm St','Wetherill Park','NSW','2164'],
         ['Mr','Liam','','Nguyen','1985-09-16','M','3000000006',1,'liam.n@example.com','0401222333','18','Oak Ave','Blacktown','NSW','2148'],
+        ['Ms','Romy','','Renfrew','1993-02-11','F','3000000007',1,'romy.r@example.com','0402444555','7','Cedar St','Blacktown','NSW','2148'],
+        ['Mr','Ubong','','Essiet','1991-12-03','M','3000000008',1,'ubong.e@example.com','0402666777','21','Pine Rd','Blacktown','NSW','2148'],
     ];
     $st = $p->prepare("INSERT INTO students (salutation,first_name,middle_name,last_name,date_of_birth,gender,usi_number,usi_verified,email,mobile_phone,street_number,street_name,suburb,state,postcode,country_of_birth,highest_school_level) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'1101','12')");
     foreach ($students as $s) $st->execute($s);
 
     // Enrolments + units + certificates with a spread of statuses/expiries
-    $en = $p->prepare("INSERT INTO enrolments (student_id,course_id,plan_id,schedule_id,location_id,start_date,end_date,status,amount_due,amount_paid,payment_status) VALUES (?,?,?,?,?,?,?,?,?,?,?)");
+    $en = $p->prepare("INSERT INTO enrolments (student_id,course_id,plan_id,schedule_id,location_id,start_date,end_date,status,amount_due,amount_paid,payment_status,online_complete,avetmiss_complete,id_confirmed,attendance_marked,tasks_satisfactory) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
     $eu = $p->prepare("INSERT INTO enrolment_units (enrolment_id,unit_id,outcome_national,date_achieved) VALUES (?,?,?,?)");
     $ce = $p->prepare("INSERT INTO certificates (enrolment_id,student_id,type,certificate_number,issue_date,expiry_date,emailed_at) VALUES (?,?,?,?,?,?,?)");
 
@@ -161,30 +167,39 @@ function db_seed(PDO $p): void {
         $ce->execute([$enrId,$stuId,'statement_of_attainment',$num,$issue,$exp,$issue.' 10:05:00']);
     };
 
-    // 1) Feroza - CPR completed & issued, expiring soon (issued ~11 months ago -> expiry in ~1 month) => reminder due
-    $en->execute([1,1,1,1,1,'2025-09-05','2025-09-05','issued',45,45,'paid']);
+    // flags order after payment_status: online, avetmiss, id, attendance, tasks
+    // 1) Feroza - CPR completed & issued, expiring soon => reminder due
+    $en->execute([1,1,1,1,1,'2025-09-05','2025-09-05','issued',45,45,'paid',1,1,1,1,1]);
     $eu->execute([1,1,'20','2025-09-05']);
     $addCert(1,1,'SA46055-22001','2025-09-05',12);
 
-    // 2) Howard - Child Care completed & issued (3yr validity, plenty of time)
-    $en->execute([2,3,5,3,1,'2026-07-01','2026-07-01','issued',99,99,'paid']);
+    // 2) Howard - Child Care completed & issued (3yr validity)
+    $en->execute([2,3,5,3,1,'2026-07-01','2026-07-01','issued',99,99,'paid',1,1,1,1,1]);
     $eu->execute([2,3,'20','2026-07-01']);
     $addCert(2,2,'SA46055-22002','2026-07-01',36);
 
-    // 3) Amna - CPR complete, not yet issued
-    $en->execute([3,1,2,4,3,'2026-08-01','2026-08-01','complete',45,45,'paid']);
+    // 3) Amna - CPR complete, all requirements green, ready to certify
+    $en->execute([3,1,2,4,3,'2026-08-01','2026-08-01','complete',45,45,'paid',1,1,1,1,1]);
     $eu->execute([3,1,'20','2026-08-01']);
 
-    // 4) Daniel - First Aid enrolled, online pending (not complete)
-    $en->execute([4,2,3,2,2,'2026-08-08','2026-08-08','enrolled',89,89,'paid']);
+    // 4) Daniel - First Aid enrolled, online still pending
+    $en->execute([4,2,3,2,2,'2026-08-08','2026-08-08','enrolled',89,89,'paid',0,1,1,0,0]);
     $eu->execute([4,2,'70',null]);
 
-    // 5) Priya - CPR enrolled, no USI yet, unpaid
-    $en->execute([5,1,1,1,1,'2026-08-01','2026-08-01','enrolled',45,0,'unpaid']);
+    // 5) Priya - CPR enrolled, no USI yet, unpaid, nothing done
+    $en->execute([5,1,1,1,1,'2026-08-01','2026-08-01','enrolled',45,0,'unpaid',0,0,0,0,0]);
     $eu->execute([5,1,'70',null]);
 
     // 6) Liam - CPR issued last year, EXPIRED last month (overdue renewal)
-    $en->execute([6,1,1,null,2,'2025-06-20','2025-06-20','issued',45,45,'paid']);
+    $en->execute([6,1,1,null,2,'2025-06-20','2025-06-20','issued',45,45,'paid',1,1,1,1,1]);
     $eu->execute([6,1,'20','2025-06-20']);
     $addCert(6,6,'SA46055-21988','2025-06-20',12);
+
+    // 7) Romy Renfrew - First Aid, schedule 2 (Blacktown) - all green, READY to certify
+    $en->execute([7,2,3,2,2,'2026-08-08','2026-08-08','complete',89,89,'paid',1,1,1,1,1]);
+    $eu->execute([7,2,'70',null]);
+
+    // 8) Ubong Essiet - First Aid, schedule 2 - online done but ID not sighted & not marked present
+    $en->execute([8,2,3,2,2,'2026-08-08','2026-08-08','enrolled',89,89,'paid',1,1,0,0,0]);
+    $eu->execute([8,2,'70',null]);
 }
