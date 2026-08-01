@@ -40,6 +40,40 @@ if ($r === 'verify') {
     exit;
 }
 
+/* ---- public Quality Indicator survey (tokenised link, no login) ---- */
+if ($r === 'survey') {
+    require __DIR__ . '/../lib/survey.php';
+    $pdo = db();
+    $token = trim($_GET['t'] ?? '');
+    $st = $pdo->prepare("SELECT sv.*, s.first_name, s.last_name, co.code course_code, co.title course_title
+        FROM surveys sv
+        LEFT JOIN students s ON s.id=sv.student_id
+        LEFT JOIN enrolments e ON e.id=sv.enrolment_id
+        LEFT JOIN courses co ON co.id=e.course_id
+        WHERE sv.token=?");
+    $st->execute([$token]);
+    $survey = $st->fetch() ?: null;
+
+    if ($survey && $_SERVER['REQUEST_METHOD'] === 'POST' && !$survey['completed_at']) {
+        $questions = survey_questions($survey['type']);
+        $answers = [];
+        foreach ($questions as $code=>$q) {
+            $v = (int)($_POST['q'][$code] ?? 0);
+            if ($v>=1 && $v<=4) $answers[$code] = $v;
+        }
+        $upd = $pdo->prepare("UPDATE surveys SET completed_at=datetime('now'), answers=?, comment_best=?, comment_improve=?, respondent_name=COALESCE(NULLIF(?,''),respondent_name), company_name=COALESCE(NULLIF(?,''),company_name) WHERE id=?");
+        $upd->execute([
+            json_encode($answers), trim($_POST['best'] ?? ''), trim($_POST['improve'] ?? ''),
+            trim($_POST['respondent_name'] ?? ''), trim($_POST['company_name'] ?? ''), $survey['id']
+        ]);
+        $survey = null; // fall through to thank-you
+        render('survey', ['survey'=>null,'done'=>true,'token'=>$token], 'Survey submitted');
+        exit;
+    }
+    render('survey', ['survey'=>$survey,'done'=>false,'token'=>$token], 'Quality Indicator Survey');
+    exit;
+}
+
 /* ================= STUDENT PORTAL (learner-facing, separate login) ================= */
 if ($r === 'student_login') {
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -237,6 +271,51 @@ case 'reminders':
         JOIN enrolments e ON e.id=c.enrolment_id JOIN courses co ON co.id=e.course_id
         WHERE c.expiry_date IS NOT NULL ORDER BY c.expiry_date ASC")->fetchAll();
     render('reminders', compact('rows'), 'Renewal Reminders');
+    break;
+
+case 'trainer':
+    // Trainer dashboard: classes assigned to this trainer + readiness
+    $uid = (int)$_SESSION['uid'];
+    $isTrainer = (current_user()['role'] ?? '') === 'trainer';
+    // admins see all classes; trainers see their own
+    $sqlWhere = $isTrainer ? "WHERE sc.trainer_id=?" : "";
+    $sql = "
+        SELECT sc.*, p.title plan_title, co.code course_code, co.title course_title, l.name location,
+          (SELECT COUNT(*) FROM enrolments e WHERE e.schedule_id=sc.id) enrolled,
+          (SELECT COUNT(*) FROM enrolments e WHERE e.schedule_id=sc.id AND e.attendance_marked=1) present,
+          (SELECT COUNT(*) FROM enrolments e WHERE e.schedule_id=sc.id AND e.tasks_satisfactory=1) assessed,
+          (SELECT COUNT(*) FROM enrolments e WHERE e.schedule_id=sc.id AND e.status='issued') issued
+        FROM schedules sc JOIN plans p ON p.id=sc.plan_id JOIN courses co ON co.id=p.course_id
+        LEFT JOIN locations l ON l.id=sc.location_id $sqlWhere ORDER BY sc.start_date";
+    $stt = $pdo->prepare($sql);
+    $stt->execute($isTrainer ? [$uid] : []);
+    $classes = $stt->fetchAll();
+    $me = current_user();
+    render('trainer', compact('classes','me','isTrainer'), 'Trainer Dashboard');
+    break;
+
+case 'surveys':
+    require __DIR__ . '/../lib/survey.php';
+    survey_backfill($pdo);
+    $stats = survey_stats($pdo);
+    $rows = $pdo->query("
+        SELECT sv.*, s.first_name, s.last_name, co.code course_code
+        FROM surveys sv LEFT JOIN students s ON s.id=sv.student_id
+        LEFT JOIN enrolments e ON e.id=sv.enrolment_id LEFT JOIN courses co ON co.id=e.course_id
+        ORDER BY sv.completed_at IS NULL, sv.completed_at DESC, sv.sent_at DESC")->fetchAll();
+    render('surveys', compact('stats','rows'), 'Survey Reporting');
+    break;
+
+case 'survey_view':
+    require __DIR__ . '/../lib/survey.php';
+    $id = (int)($_GET['id'] ?? 0);
+    $sv = $pdo->prepare("SELECT sv.*, s.first_name, s.last_name, co.title course_title
+        FROM surveys sv LEFT JOIN students s ON s.id=sv.student_id
+        LEFT JOIN enrolments e ON e.id=sv.enrolment_id LEFT JOIN courses co ON co.id=e.course_id
+        WHERE sv.id=?");
+    $sv->execute([$id]); $survey = $sv->fetch();
+    if (!$survey) { http_response_code(404); echo 'Not found'; break; }
+    render('survey_view', compact('survey'), 'Survey response');
     break;
 
 case 'avetmiss':

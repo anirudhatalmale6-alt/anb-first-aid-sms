@@ -90,6 +90,20 @@ function db_migrate(PDO $p): void {
         reminder_6wk_sent TEXT, reminder_2wk_sent TEXT,
         FOREIGN KEY(enrolment_id) REFERENCES enrolments(id), FOREIGN KEY(student_id) REFERENCES students(id)
     );
+    CREATE TABLE surveys (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        token TEXT NOT NULL UNIQUE,
+        type TEXT NOT NULL DEFAULT 'learner',   -- learner | employer (NCVER Quality Indicators)
+        student_id INTEGER, enrolment_id INTEGER, certificate_id INTEGER,
+        respondent_name TEXT, company_name TEXT,
+        sent_at TEXT, completed_at TEXT,
+        answers TEXT,      -- JSON {code:score}
+        comment_best TEXT, comment_improve TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY(student_id) REFERENCES students(id),
+        FOREIGN KEY(enrolment_id) REFERENCES enrolments(id),
+        FOREIGN KEY(certificate_id) REFERENCES certificates(id)
+    );
     ");
 }
 
@@ -97,6 +111,9 @@ function db_seed(PDO $p): void {
     // Admin login (authorised signatory)
     $p->prepare("INSERT INTO users (name,email,password,role,is_trainer) VALUES (?,?,?,?,1)")
       ->execute(['Gloria Omoregie','admin@anbfirstaidtraining.com.au', password_hash('demo1234', PASSWORD_DEFAULT),'admin']);
+    // Trainer login (delivers classes, marks attendance & assessment outcomes)
+    $p->prepare("INSERT INTO users (name,email,password,role,is_trainer) VALUES (?,?,?,?,1)")
+      ->execute(['David Trainer','trainer@anbfirstaidtraining.com.au', password_hash('demo1234', PASSWORD_DEFAULT),'trainer']);
 
     // Locations
     $locs = [['St. Marys','NSW','2760'],['Blacktown (Max Webber Function Centre)','NSW','2148'],
@@ -133,12 +150,13 @@ function db_seed(PDO $p): void {
 
     // Schedules (a few upcoming)
     $today = new DateTime('2026-08-01');
-    $ss = $p->prepare("INSERT INTO schedules (plan_id,location_id,name,start_date,start_time,end_date,end_time,total_places) VALUES (?,?,?,?,?,?,?,?)");
+    $ss = $p->prepare("INSERT INTO schedules (plan_id,location_id,name,start_date,start_time,end_date,end_time,total_places,trainer_id) VALUES (?,?,?,?,?,?,?,?,?)");
+    // trainer_id 2 = David Trainer (all classes assigned to him for the demo)
     $schedRows = [
-        [1,1,'CPR Express - St. Marys','2026-08-01','09:30','2026-08-01','10:15',15],
-        [3,2,'First Aid - Blacktown','2026-08-08','09:00','2026-08-08','13:00',15],
-        [5,1,'Child Care First Aid - St. Marys','2026-08-15','09:00','2026-08-15','15:00',12],
-        [2,3,'CPR Regular - Seven Hills','2026-08-22','09:30','2026-08-22','10:15',15],
+        [1,1,'CPR Express - St. Marys','2026-08-01','09:30','2026-08-01','10:15',15,2],
+        [3,2,'First Aid - Blacktown','2026-08-08','09:00','2026-08-08','13:00',15,2],
+        [5,1,'Child Care First Aid - St. Marys','2026-08-15','09:00','2026-08-15','15:00',12,2],
+        [2,3,'CPR Regular - Seven Hills','2026-08-22','09:30','2026-08-22','10:15',15,2],
     ];
     foreach ($schedRows as $r) $ss->execute($r);
 
@@ -202,4 +220,18 @@ function db_seed(PDO $p): void {
     // 8) Ubong Essiet - First Aid, schedule 2 - online done but ID not sighted & not marked present
     $en->execute([8,2,3,2,2,'2026-08-08','2026-08-08','enrolled',89,89,'paid',1,1,0,0,0]);
     $eu->execute([8,2,'70',null]);
+
+    // ---- Quality Indicator surveys (NCVER Learner Engagement + Employer Satisfaction) ----
+    // Attached to issued certificates: cert 1 = Feroza (SA46055-22001), cert 2 = Howard (SA46055-22002)
+    $sv = $p->prepare("INSERT INTO surveys (token,type,student_id,enrolment_id,certificate_id,respondent_name,company_name,sent_at,completed_at,answers,comment_best,comment_improve) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)");
+    // learner survey - completed (mostly Agree/Strongly Agree)
+    $learnerAns = json_encode(['LE1'=>4,'LE2'=>4,'LE3'=>3,'LE4'=>4,'LE5'=>4,'LE6'=>3,'LE7'=>4,'LE8'=>4,'LE9'=>4,'LE10'=>3]);
+    $sv->execute(['SVL0000001','learner',1,1,1,'Feroza Haidari',null,'2025-09-05 10:10:00','2025-09-06 18:22:00',$learnerAns,'The trainer was clear and the hands-on CPR practice was excellent.','More parking at the venue would help.']);
+    // learner survey - sent, not yet completed
+    $sv->execute(['SVL0000002','learner',2,2,2,'Howard Lucasan',null,'2026-07-01 10:10:00',null,null,null,null]);
+    // employer survey - completed (company that funded Howard's child-care first aid)
+    $empAns = json_encode(['ES1'=>4,'ES2'=>4,'ES3'=>4,'ES4'=>3,'ES5'=>4,'ES6'=>4,'ES7'=>3,'ES8'=>4]);
+    $sv->execute(['SVE0000001','employer',2,2,2,'Sarah Chen (HR Manager)','Little Explorers Early Learning','2026-07-01 10:12:00','2026-07-04 09:15:00',$empAns,'Staff came back confident and job-ready.','Nothing - smooth process.']);
+    // employer survey - sent, not yet completed
+    $sv->execute(['SVE0000002','employer',1,1,1,null,'St Marys Community Centre','2025-09-05 10:12:00',null,null,null,null]);
 }
