@@ -34,6 +34,10 @@ foreach ($rows as $r) {
   </div>
 </div>
 
+<?php if (!empty($_SESSION['flash'])): ?>
+  <div class="alert alert-success"><i class="bi bi-check-circle-fill"></i> <?= e($_SESSION['flash']) ?></div>
+  <?php unset($_SESSION['flash']); endif; ?>
+
 <div class="alert alert-light border small">
   <i class="bi bi-list-check text-danger"></i>
   Every student in this class at a glance. Green = done, amber = pending, red = outstanding.
@@ -82,8 +86,10 @@ foreach ($rows as $r) {
         <td class="pipe-td"><?= dot($r['attendance_marked']) ?></td>
         <td class="pipe-td"><?= dot($r['tasks_satisfactory'], !$r['tasks_satisfactory'] && $r['attendance_marked']) ?></td>
         <td class="pipe-td">
-          <?php if ($allGreen): ?>
-            <button class="btn btn-sm btn-anb py-0"><i class="bi bi-award"></i> Generate</button>
+          <?php if ($r['status']==='issued'): ?>
+            <span class="badge text-bg-success">Issued</span>
+          <?php elseif ($allGreen): ?>
+            <a href="?r=generate&enrolment_id=<?= (int)$r['id'] ?>" class="btn btn-sm btn-anb py-0"><i class="bi bi-award"></i> Generate</a>
           <?php else: ?><span class="text-muted small">—</span><?php endif; ?>
         </td>
       </tr>
@@ -95,7 +101,7 @@ foreach ($rows as $r) {
     <div class="small text-muted">Only students with every box green can be certified.</div>
     <div>
       <button class="btn btn-outline-secondary"><i class="bi bi-arrow-repeat"></i> Refresh</button>
-      <button class="btn btn-success"><i class="bi bi-check2-all"></i> Sign Off &amp; Generate Certificates (<?= $ready ?>)</button>
+      <a href="?r=signoff&schedule_id=<?= (int)$schedule['id'] ?>" class="btn btn-success"><i class="bi bi-check2-all"></i> Sign Off &amp; Generate Certificates (<?= $ready ?>)</a>
     </div>
   </div>
 </div>

@@ -26,6 +26,20 @@ if ($r === 'login') {
 }
 if ($r === 'logout') { session_destroy(); redirect('?r=login'); }
 
+/* ---- public certificate verification (QR target, no login) ---- */
+if ($r === 'verify') {
+    $num = trim($_GET['cert'] ?? '');
+    $st = db()->prepare("
+        SELECT c.*, s.first_name, s.last_name, co.code course_code, co.title course_title
+        FROM certificates c JOIN students s ON s.id=c.student_id
+        JOIN enrolments e ON e.id=c.enrolment_id JOIN courses co ON co.id=e.course_id
+        WHERE c.certificate_number=?");
+    $st->execute([$num]);
+    $cert = $st->fetch() ?: null;
+    render('verify', compact('cert','num'), 'Verify certificate');
+    exit;
+}
+
 require_login();
 $pdo = db();
 
@@ -99,6 +113,43 @@ case 'schedules':
         FROM schedules sc JOIN plans p ON p.id=sc.plan_id JOIN courses co ON co.id=p.course_id
         LEFT JOIN locations l ON l.id=sc.location_id ORDER BY sc.start_date")->fetchAll();
     render('schedules', compact('rows'), 'Schedules');
+    break;
+
+case 'generate':
+    require __DIR__ . '/../lib/certificate.php';
+    $eid = (int)($_GET['enrolment_id'] ?? 0);
+    try { $cert = anb_generate_certificate($pdo, $eid); redirect('?r=cert&num='.urlencode($cert['certificate_number'])); }
+    catch (Throwable $ex) { echo 'Could not generate: '.e($ex->getMessage()); }
+    break;
+
+case 'signoff':
+    require __DIR__ . '/../lib/certificate.php';
+    $sid = (int)($_GET['schedule_id'] ?? 0);
+    // find ready enrolments in this schedule not yet issued
+    $q = $pdo->prepare("
+        SELECT e.id FROM enrolments e JOIN students s ON s.id=e.student_id
+        WHERE e.schedule_id=? AND e.status!='issued'
+          AND e.online_complete=1 AND e.avetmiss_complete=1 AND e.id_confirmed=1
+          AND e.attendance_marked=1 AND e.tasks_satisfactory=1 AND e.payment_status='paid'
+          AND s.usi_number IS NOT NULL AND s.usi_number<>''");
+    $q->execute([$sid]);
+    $n = 0;
+    foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $eid) { try { anb_generate_certificate($pdo, (int)$eid); $n++; } catch (Throwable $ex) {} }
+    $_SESSION['flash'] = "$n certificate(s) generated and issued.";
+    redirect('?r=pipeline&schedule_id='.$sid);
+    break;
+
+case 'cert':
+    $num = trim($_GET['num'] ?? '');
+    $c = $pdo->prepare("SELECT * FROM certificates WHERE certificate_number=?");
+    $c->execute([$num]); $cert = $c->fetch();
+    $file = $cert ? __DIR__ . '/../data/' . $cert['file_path'] : '';
+    if ($cert && is_file($file)) {
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: inline; filename="'.$num.'.pdf"');
+        readfile($file); exit;
+    }
+    http_response_code(404); echo 'Certificate not found';
     break;
 
 case 'pipeline':

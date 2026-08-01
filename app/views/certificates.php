@@ -9,7 +9,11 @@
     <tbody>
     <?php foreach ($rows as $c): $d = days_until($c['expiry_date']); ?>
       <tr>
-        <td class="fw-semibold small"><?= e($c['certificate_number']) ?></td>
+        <td class="fw-semibold small">
+          <?php if (!empty($c['file_path'])): ?>
+            <a href="?r=cert&num=<?= urlencode($c['certificate_number']) ?>" target="_blank"><?= e($c['certificate_number']) ?> <i class="bi bi-file-earmark-pdf"></i></a>
+          <?php else: ?><?= e($c['certificate_number']) ?><?php endif; ?>
+        </td>
         <td class="small"><a href="?r=student&id=<?= (int)$c['student_id'] ?>" class="text-decoration-none"><?= e($c['first_name'].' '.$c['last_name']) ?></a></td>
         <td class="small"><?= e($c['course_code']) ?> — <?= e($c['course_title']) ?></td>
         <td class="small"><?= e($c['issue_date']) ?></td>
