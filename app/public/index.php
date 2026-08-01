@@ -40,6 +40,51 @@ if ($r === 'verify') {
     exit;
 }
 
+/* ================= STUDENT PORTAL (learner-facing, separate login) ================= */
+if ($r === 'student_login') {
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $em = trim($_POST['email'] ?? '');
+        $st = db()->prepare("SELECT * FROM students WHERE email=?"); $st->execute([$em]); $s = $st->fetch();
+        // demo password for the learner portal
+        if ($s && ($_POST['password'] ?? '') === 'student123') { $_SESSION['student_id'] = $s['id']; redirect('?r=my'); }
+        render('student_login', ['error'=>'Invalid email or password.'], 'Student login'); exit;
+    }
+    render('student_login', [], 'Student login'); exit;
+}
+if ($r === 'student_logout') { unset($_SESSION['student_id']); redirect('?r=student_login'); }
+
+if (in_array($r, ['my','mycert'], true)) {
+    if (empty($_SESSION['student_id'])) redirect('?r=student_login');
+    $pdo = db(); $sid = (int)$_SESSION['student_id'];
+
+    if ($r === 'mycert') {
+        $num = trim($_GET['num'] ?? '');
+        $c = $pdo->prepare("SELECT * FROM certificates WHERE certificate_number=? AND student_id=?");
+        $c->execute([$num, $sid]); $cert = $c->fetch();
+        $file = $cert ? __DIR__ . '/../data/' . $cert['file_path'] : '';
+        if ($cert && $cert['file_path'] && is_file($file)) {
+            header('Content-Type: application/pdf');
+            header('Content-Disposition: attachment; filename="'.$num.'.pdf"');
+            readfile($file); exit;
+        }
+        http_response_code(404); echo 'Certificate not available'; exit;
+    }
+
+    // my learning dashboard
+    $me = $pdo->prepare("SELECT * FROM students WHERE id=?"); $me->execute([$sid]); $me = $me->fetch();
+    $enr = $pdo->prepare("
+        SELECT e.*, co.code course_code, co.title course_title, p.title plan_title,
+               sc.start_date sched_date, sc.start_time sched_time, l.name location
+        FROM enrolments e JOIN courses co ON co.id=e.course_id JOIN plans p ON p.id=e.plan_id
+        LEFT JOIN schedules sc ON sc.id=e.schedule_id LEFT JOIN locations l ON l.id=e.location_id
+        WHERE e.student_id=? ORDER BY e.start_date DESC");
+    $enr->execute([$sid]); $enrolments = $enr->fetchAll();
+    $ct = $pdo->prepare("SELECT c.*, co.title course_title FROM certificates c JOIN enrolments e ON e.id=c.enrolment_id JOIN courses co ON co.id=e.course_id WHERE c.student_id=? ORDER BY c.issue_date DESC");
+    $ct->execute([$sid]); $mycerts = $ct->fetchAll();
+    render('portal', compact('me','enrolments','mycerts'), 'My Learning');
+    exit;
+}
+
 require_login();
 $pdo = db();
 
