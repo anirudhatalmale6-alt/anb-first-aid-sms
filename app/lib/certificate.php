@@ -109,101 +109,111 @@ function anb_generate_certificate(PDO $pdo, int $enrolmentId): array {
     return $pdo->query("SELECT * FROM certificates WHERE id=".(int)$pdo->lastInsertId())->fetch();
 }
 
-/** Render the Statement of Attainment PDF (matches A&B layout). */
+/** Render the Statement of Attainment PDF - professional design. */
 function anb_render_soa(string $out, string $qrFile, array $d): void {
     $pdf = new FPDF('P', 'mm', 'A4');
     $pdf->AddPage();
     $pdf->SetAutoPageBreak(false);
-    $W = 210;
+    $W = 210; $H = 297;
+    $assets = __DIR__ . '/../assets';
+    $purple = [47,29,58]; $red = [229,57,53]; $grey = [90,90,90];
+    $sig = static function($p,$c){ $p->SetTextColor($c[0],$c[1],$c[2]); };
 
-    // --- branded header (drawn badge + name) ---
-    $pdf->SetFillColor(229,57,53);
-    $pdf->Rect(($W/2)-42, 12, 18, 14, 'F'); // badge bg
-    $pdf->SetTextColor(255,255,255);
-    $pdf->SetFont('Arial','B',15);
-    $pdf->SetXY(($W/2)-42, 14); $pdf->Cell(18,10,'A&B',0,0,'C');
-    $pdf->SetTextColor(47,29,58);
-    $pdf->SetFont('Arial','B',18);
-    $pdf->SetXY(($W/2)-22, 13); $pdf->Cell(64,8,'A & B',0,2,'L');
-    $pdf->SetFont('Arial','B',11);
-    $pdf->SetX(($W/2)-22); $pdf->Cell(64,6,'First Aid Training',0,0,'L');
+    // ---- ornamental double border ----
+    $pdf->SetDrawColor(...$purple); $pdf->SetLineWidth(1.1);
+    $pdf->Rect(8, 8, $W-16, $H-16);
+    $pdf->SetDrawColor(...$red); $pdf->SetLineWidth(0.4);
+    $pdf->Rect(11, 11, $W-22, $H-22);
+    // corner accents (small filled squares as beads)
+    $pdf->SetFillColor(...$red);
+    foreach ([[9.4,9.4],[$W-11.4,9.4],[9.4,$H-11.4],[$W-11.4,$H-11.4]] as $c)
+        $pdf->Rect($c[0],$c[1],2,2,'F');
 
-    // --- title ---
-    $pdf->SetTextColor(30,30,30);
-    $pdf->SetFont('Arial','B',26);
-    $pdf->SetXY(0,40); $pdf->Cell($W,12,'STATEMENT OF ATTAINMENT',0,1,'C');
-    // decorative rule
-    $pdf->SetDrawColor(229,57,53); $pdf->SetLineWidth(0.6);
-    $pdf->Line(30,55,180,55);
+    // ---- faint logo watermark (behind text) ----
+    if (is_file("$assets/anb_logo_wm.png"))
+        $pdf->Image("$assets/anb_logo_wm.png", ($W/2)-70, 118, 140, 0, 'PNG');
 
-    // watermark (light)
-    $pdf->SetTextColor(238,232,240);
-    $pdf->SetFont('Arial','B',44);
-    $pdf->SetXY(0,150); $pdf->Cell($W,20,'A & B First Aid Training',0,0,'C');
+    // ---- logo ----
+    if (is_file("$assets/anb_logo.png"))
+        $pdf->Image("$assets/anb_logo.png", ($W/2)-28, 20, 56, 0, 'PNG');
 
-    // --- body ---
-    $pdf->SetTextColor(70,70,70);
-    $pdf->SetFont('Arial','I',10);
-    $pdf->SetXY(25,64);
-    $pdf->MultiCell($W-50,5,'A statement of attainment is issued by a Registered Training Organisation when an individual has completed one or more accredited units or modules.',0,'C');
+    // ---- title ----
+    $sig($pdf,$purple); $pdf->SetFont('Arial','B',27);
+    $pdf->SetXY(0,50); $pdf->Cell($W,13,'STATEMENT OF ATTAINMENT',0,1,'C');
+    // rule with centre bead
+    $pdf->SetDrawColor(...$red); $pdf->SetLineWidth(0.5);
+    $pdf->Line(45,66,$W-45,66);
+    $pdf->SetFillColor(...$red); $pdf->Rect(($W/2)-1.4,64.6,2.8,2.8,'F');
 
-    $pdf->SetFont('Arial','',11);
-    $pdf->SetXY(0,84); $pdf->Cell($W,6,'This is a statement that',0,1,'C');
-    $pdf->SetTextColor(30,30,30);
-    $pdf->SetFont('Arial','B',20);
-    $pdf->SetXY(0,92); $pdf->Cell($W,10,$d['name'],0,1,'C');
-    $pdf->SetTextColor(70,70,70);
-    $pdf->SetFont('Arial','',11);
-    $pdf->SetXY(0,104); $pdf->Cell($W,6,'has attained:',0,1,'C');
+    // ---- blurb ----
+    $sig($pdf,$grey); $pdf->SetFont('Arial','I',10);
+    $pdf->SetXY(30,72);
+    $pdf->MultiCell($W-60,5,'A statement of attainment is issued by a Registered Training Organisation when an individual has completed one or more accredited units or modules.',0,'C');
 
-    // --- units table ---
-    $y = 116;
-    $pdf->SetFont('Arial','B',10); $pdf->SetTextColor(47,29,58);
-    $pdf->SetXY(30,$y); $pdf->Cell(30,7,'Code',0,0,'L');
-    $pdf->Cell(90,7,'Title',0,0,'L');
-    $pdf->Cell(0,7,'Expiry Date',0,1,'R');
-    $pdf->SetDrawColor(220,220,220); $pdf->SetLineWidth(0.2); $pdf->Line(30,$y+7,180,$y+7);
-    $pdf->SetFont('Arial','',10); $pdf->SetTextColor(40,40,40);
+    // ---- recipient ----
+    $pdf->SetFont('Arial','',11.5); $sig($pdf,$grey);
+    $pdf->SetXY(0,90); $pdf->Cell($W,6,'This is hereby awarded to',0,1,'C');
+    $sig($pdf,$purple); $pdf->SetFont('Arial','B',24);
+    $pdf->SetXY(0,98); $pdf->Cell($W,12,$d['name'],0,1,'C');
+    // underline flourish under name
+    $nameW = $pdf->GetStringWidth($d['name']);
+    $pdf->SetDrawColor(200,180,150); $pdf->SetLineWidth(0.3);
+    $pdf->Line(($W/2)-($nameW/2)-6,113,($W/2)+($nameW/2)+6,113);
+    $sig($pdf,$grey); $pdf->SetFont('Arial','',11);
+    $pdf->SetXY(0,116); $pdf->Cell($W,6,'for attaining the following nationally recognised unit(s) of competency:',0,1,'C');
+
+    // ---- units table ----
+    $y = 130; $lx = 32; $rx = $W-32;
+    $pdf->SetFont('Arial','B',9.5); $sig($pdf,$purple);
+    $pdf->SetXY($lx,$y); $pdf->Cell(28,7,'CODE',0,0,'L');
+    $pdf->Cell(96,7,'TITLE',0,0,'L');
+    $pdf->Cell($rx-$lx-124,7,'EXPIRY',0,1,'R');
+    $pdf->SetDrawColor(...$red); $pdf->SetLineWidth(0.3); $pdf->Line($lx,$y+7,$rx,$y+7);
+    $pdf->SetFont('Arial','',10.5); $sig($pdf,[40,40,40]);
     $y += 9;
     foreach ($d['units'] as $un) {
-        $pdf->SetXY(30,$y); $pdf->Cell(30,7,$un['code'],0,0,'L');
-        $pdf->Cell(90,7,$un['title'],0,0,'L');
-        $pdf->Cell(0,7,$d['expiry'],0,1,'R');
-        $y += 8;
+        $pdf->SetXY($lx,$y); $pdf->SetFont('Arial','B',10.5); $pdf->Cell(28,7,$un['code'],0,0,'L');
+        $pdf->SetFont('Arial','',10.5); $pdf->Cell(96,7,$un['title'],0,0,'L');
+        $pdf->Cell($rx-$lx-124,7,$d['expiry'],0,1,'R');
+        $pdf->SetDrawColor(230,230,230); $pdf->SetLineWidth(0.1); $pdf->Line($lx,$y+7.5,$rx,$y+7.5);
+        $y += 8.5;
     }
 
-    // --- date issued ---
-    $pdf->SetFont('Arial','',11); $pdf->SetTextColor(70,70,70);
-    $pdf->SetXY(0,$y+8); $pdf->Cell($W,6,'Date Issued: '.date('jS F Y', strtotime($d['issue'])),0,1,'C');
+    // ---- date issued ----
+    $pdf->SetFont('Arial','',11); $sig($pdf,$grey);
+    $pdf->SetXY(0,$y+7); $pdf->Cell($W,6,'Date of Issue: '.date('jS F Y', strtotime($d['issue'])),0,1,'C');
 
-    // --- signatory ---
-    $pdf->SetTextColor(30,30,30);
-    $pdf->SetFont('Arial','B',13);
-    $pdf->SetXY(115,225); $pdf->Cell(70,6,'Gloria Omoregie',0,2,'L');
-    $pdf->SetDrawColor(120,120,120); $pdf->SetLineWidth(0.3); $pdf->Line(115,233,175,233);
-    $pdf->SetFont('Arial','',9); $pdf->SetTextColor(80,80,80);
-    $pdf->SetXY(115,234); $pdf->Cell(70,5,'Authorised Signatory',0,2,'L');
-    $pdf->Cell(70,5,ANB_NAME,0,0,'L');
-    // nationally recognised (left)
-    $pdf->SetTextColor(0,120,60); $pdf->SetFont('Arial','B',9);
-    $pdf->SetXY(30,226); $pdf->Cell(70,5,'NATIONALLY',0,2,'L');
-    $pdf->Cell(70,5,'RECOGNISED TRAINING',0,0,'L');
+    // ---- Nationally Recognised Training mark (drawn) ----
+    $nrtX = 30; $nrtY = 224;
+    $pdf->SetFillColor(0,132,80);   $pdf->Rect($nrtX,$nrtY,4,9,'F');
+    $pdf->SetFillColor(220,40,40);  $pdf->Rect($nrtX+5,$nrtY,4,9,'F');
+    $pdf->SetFillColor(60,60,60);   $pdf->Rect($nrtX+10,$nrtY,4,9,'F');
+    $sig($pdf,[60,60,60]); $pdf->SetFont('Arial','B',8);
+    $pdf->SetXY($nrtX,$nrtY+10); $pdf->Cell(60,4,'NATIONALLY RECOGNISED',0,2,'L');
+    $pdf->Cell(60,4,'TRAINING',0,0,'L');
 
-    // --- footer ---
-    $pdf->SetDrawColor(229,57,53); $pdf->SetLineWidth(0.4); $pdf->Line(15,262,195,262);
-    $pdf->SetFont('Arial','',8); $pdf->SetTextColor(90,90,90);
-    // left company
-    $pdf->SetXY(15,266);
-    $pdf->MultiCell(70,4, ANB_NAME."\n".ANB_ADDR."\n".ANB_PHONE."\n".ANB_EMAIL,0,'L');
-    // center QR
-    if (is_file($qrFile)) $pdf->Image($qrFile, ($W/2)-11, 266, 22, 22, 'PNG');
-    // right details
-    $pdf->SetXY(125,266);
-    $pdf->MultiCell(70,4,
+    // ---- signatory ----
+    if (!empty($d['signature']) && is_file($d['signature']))
+        $pdf->Image($d['signature'], 120, 218, 45, 0, 'PNG');
+    $pdf->SetDrawColor(120,120,120); $pdf->SetLineWidth(0.3); $pdf->Line(118,233,178,233);
+    $sig($pdf,$purple); $pdf->SetFont('Arial','B',12);
+    $pdf->SetXY(118,234); $pdf->Cell(60,5,'Gloria Omoregie',0,2,'L');
+    $sig($pdf,[90,90,90]); $pdf->SetFont('Arial','',8.5);
+    $pdf->Cell(60,4,'Authorised Signatory',0,2,'L');
+    $pdf->Cell(60,4,ANB_NAME,0,0,'L');
+
+    // ---- footer ----
+    $pdf->SetDrawColor(...$red); $pdf->SetLineWidth(0.4); $pdf->Line(16,260,$W-16,260);
+    $pdf->SetFont('Arial','',7.8); $sig($pdf,[90,90,90]);
+    $pdf->SetXY(16,264);
+    $pdf->MultiCell(72,4, ANB_NAME."\n".ANB_ADDR."\n".ANB_PHONE."  |  ".ANB_EMAIL,0,'L');
+    if (is_file($qrFile)) $pdf->Image($qrFile, ($W/2)-10, 263, 20, 20, 'PNG');
+    $pdf->SetXY($W-88,264);
+    $pdf->MultiCell(72,4,
         "Certificate No: ".$d['number']."\n".
         "Student No: ".$d['student_no']."\n".
-        "RTO: ".ANB_RTO."\n".
-        "ABN: ".ANB_ABN, 0,'R');
+        "RTO: ".ANB_RTO."      ABN: ".ANB_ABN."\n".
+        "Verify at ".str_replace('https://','',ANB_VERIFY_BASE), 0,'R');
 
     $pdf->Output('F', $out);
 }
