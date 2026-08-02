@@ -16,8 +16,8 @@
         </td>
         <td class="small"><a href="?r=student&id=<?= (int)$c['student_id'] ?>" class="text-decoration-none"><?= e($c['first_name'].' '.$c['last_name']) ?></a></td>
         <td class="small"><?= e($c['course_code']) ?> — <?= e($c['course_title']) ?></td>
-        <td class="small"><?= e($c['issue_date']) ?></td>
-        <td class="small"><?= e($c['expiry_date']) ?>
+        <td class="small"><?= $c['issue_date'] ? date('d-m-Y', strtotime((string)$c['issue_date'])) : '' ?></td>
+        <td class="small"><?= $c['expiry_date'] ? date('d-m-Y', strtotime((string)$c['expiry_date'])) : '' ?>
           <?php if ($d !== null && $d < 0): ?><span class="badge text-bg-danger">Expired</span>
           <?php elseif ($d !== null && $d <= 60): ?><span class="badge text-bg-warning"><?= $d ?>d</span><?php endif; ?></td>
         <td><?php if ($c['emailed_at']): ?><i class="bi bi-check-circle-fill text-success"></i><?php else: ?><span class="text-muted small">—</span><?php endif; ?></td>

@@ -214,14 +214,14 @@ function anb_render_soa(string $out, string $qrFile, array $d): void {
     foreach ($d['units'] as $un) {
         $pdf->SetXY($lx,$y); $pdf->SetFont('Arial','B',10.5); $pdf->Cell(28,7,$un['code'],0,0,'L');
         $pdf->SetFont('Arial','',10.5); $pdf->Cell(96,7,$un['title'],0,0,'L');
-        $pdf->Cell($rx-$lx-124,7,$d['expiry'],0,1,'R');
+        $pdf->Cell($rx-$lx-124,7,date('d-m-Y', strtotime($d['expiry'])),0,1,'R');
         $pdf->SetDrawColor(230,230,230); $pdf->SetLineWidth(0.1); $pdf->Line($lx,$y+7.5,$rx,$y+7.5);
         $y += 8.5;
     }
 
     // ---- date issued ----
     $pdf->SetFont('Arial','',11); $sig($pdf,$grey);
-    $pdf->SetXY(0,$y+7); $pdf->Cell($W,6,'Date of Issue: '.date('jS F Y', strtotime($d['issue'])),0,1,'C');
+    $pdf->SetXY(0,$y+7); $pdf->Cell($W,6,'Date of Issue: '.date('d-m-Y', strtotime($d['issue'])),0,1,'C');
 
     // ---- Nationally Recognised Training logo ----
     if (is_file("$assets/nrt_logo.png"))

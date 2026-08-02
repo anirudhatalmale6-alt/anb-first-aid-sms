@@ -68,7 +68,7 @@ $isPreview = empty($enrolment);
           <div class="col-md-6"><label class="form-label small fw-semibold">Allergies</label><input <?=$dis?>name="f[allergies]" class="form-control form-control-sm" value="<?= $V('allergies') ?>"></div>
           <div class="col-md-6"><label class="form-label small fw-semibold">Medications</label><input <?=$dis?>name="f[medications]" class="form-control form-control-sm" value="<?= $V('medications') ?>"></div>
         </div>
-        <div class="mt-2"><label class="form-label small fw-semibold">Incident / Injury</label><input <?=$dis?>name="f[incident_injury]" class="form-control form-control-sm" value="<?= $V('incident_injury') ?>"></div>
+        <div class="mt-2"><label class="form-label small fw-semibold">Incident / Injury (A brief description of what happened)</label><input <?=$dis?>name="f[incident_injury]" class="form-control form-control-sm" value="<?= $V('incident_injury') ?>"></div>
         <div class="mt-2"><label class="form-label small fw-semibold">Part of the body affected</label><input <?=$dis?>name="f[body_part]" class="form-control form-control-sm" value="<?= $V('body_part') ?>"></div>
 
         <label class="form-label small fw-semibold mt-3">Nature of injury (most serious) — tick all that apply</label>
@@ -82,7 +82,7 @@ $isPreview = empty($enrolment);
       </div>
 
       <div class="card p-3 mb-3">
-        <label class="form-label small fw-semibold">Assessment — identify the injury type, recognise the condition developing, and describe the correct first aid management (minor wound + shock)</label>
+        <label class="form-label small fw-semibold">Assessment — identify the injury type, recognise the condition developing, and describe the correct first aid management</label>
         <textarea <?=$dis?>name="f[assessment_answer]" class="form-control" rows="5"><?= $V('assessment_answer') ?></textarea>
         <label class="form-label small fw-semibold mt-3">Treatment given</label>
         <textarea <?=$dis?>name="f[treatment]" class="form-control" rows="3"><?= $V('treatment') ?></textarea>
