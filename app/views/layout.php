@@ -42,6 +42,8 @@
   <a href="?r=surveys"      class="<?= $r==='surveys'||$r==='survey_view'?'active':'' ?>"><i class="bi bi-ui-checks"></i> Survey Reporting</a>
   <a href="?r=reminders"    class="<?= $r==='reminders'?'active':'' ?>"><i class="bi bi-bell"></i> Renewal Reminders</a>
   <a href="?r=avetmiss"     class="<?= $r==='avetmiss'?'active':'' ?>"><i class="bi bi-file-earmark-bar-graph"></i> AVETMISS</a>
+  <a href="?r=emails"       class="<?= $r==='emails'?'active':'' ?>"><i class="bi bi-envelope-paper"></i> Email Templates</a>
+  <a href="?r=management"   class="<?= in_array($r,['management'],true)?'active':'' ?>"><i class="bi bi-folder2-open"></i> Management</a>
   <a href="?r=logout" style="margin-top:20px;border-top:1px solid rgba(255,255,255,.12)"><i class="bi bi-box-arrow-right"></i> Sign out</a>
 </div>
 <div class="content">

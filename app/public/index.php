@@ -491,6 +491,87 @@ case 'obs_save':
     redirect('?r=obs_list&module_id='.$moduleId);
     break;
 
+// ---------- Email Templates ----------
+case 'emails':
+    $pdo->exec("CREATE TABLE IF NOT EXISTS email_templates (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, subject TEXT, body TEXT, updated_at TEXT)");
+    if ((int)$pdo->query("SELECT COUNT(*) FROM email_templates")->fetchColumn() === 0) {
+        $seed = [
+          ["Certificate Issued","Your certificate from A&B First Aid Training","Hi {first_name},\n\nCongratulations on completing {course}. Your Statement of Attainment ({certificate_number}) is available to download here: {certificate_link}\n\nIssued: {issue_date}   Expiry: {expiry_date}\n\nKind regards,\nA&B First Aid Training"],
+          ["Survey Request","We would love your feedback","Hi {first_name},\n\nThank you for training with us. Please take a moment to complete this short survey: {survey_link}\n\nKind regards,\nA&B First Aid Training"],
+          ["Renewal Reminder","Your first aid certificate is due for renewal","Hi {first_name},\n\nOur records show your {course} certificate expires on {expiry_date}. Book your refresher here: {booking_link}\n\nKind regards,\nA&B First Aid Training"],
+          ["Enrolment Confirmation","Your enrolment is confirmed","Hi {first_name},\n\nYour enrolment in {course} on {class_date} at {location} is confirmed.\n\nPlease complete your online learning before class: {portal_link}\n\nKind regards,\nA&B First Aid Training"],
+        ];
+        $ins = $pdo->prepare("INSERT INTO email_templates (name,subject,body,updated_at) VALUES (?,?,?,datetime('now'))");
+        foreach ($seed as $s) $ins->execute($s);
+    }
+    $editId = (int)($_GET['edit'] ?? 0);
+    $edit = $editId ? $pdo->query("SELECT * FROM email_templates WHERE id=".$editId)->fetch() : null;
+    $rows = $pdo->query("SELECT * FROM email_templates ORDER BY name")->fetchAll();
+    render('emails', compact('rows','edit'), 'Email Templates');
+    break;
+
+case 'email_save':
+    $pdo->exec("CREATE TABLE IF NOT EXISTS email_templates (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, subject TEXT, body TEXT, updated_at TEXT)");
+    $id=(int)($_POST['id']??0); $name=trim($_POST['name']??''); $subject=trim($_POST['subject']??''); $body=trim($_POST['body']??'');
+    if ($name!=='') {
+        if ($id) $pdo->prepare("UPDATE email_templates SET name=?,subject=?,body=?,updated_at=datetime('now') WHERE id=?")->execute([$name,$subject,$body,$id]);
+        else     $pdo->prepare("INSERT INTO email_templates (name,subject,body,updated_at) VALUES (?,?,?,datetime('now'))")->execute([$name,$subject,$body]);
+        $_SESSION['flash']='Template saved.';
+    } else $_SESSION['flash']='Please enter a template name.';
+    redirect('?r=emails');
+    break;
+
+case 'email_delete':
+    $pdo->prepare("DELETE FROM email_templates WHERE id=?")->execute([(int)($_GET['id']??0)]);
+    $_SESSION['flash']='Template deleted.';
+    redirect('?r=emails');
+    break;
+
+// ---------- Organisation Management (files) ----------
+case 'management':
+    $pdo->exec("CREATE TABLE IF NOT EXISTS org_files (id INTEGER PRIMARY KEY AUTOINCREMENT, category TEXT, title TEXT, notes TEXT, file_path TEXT, original_name TEXT, uploaded_at TEXT)");
+    $cats = ['Meetings','Quality Improvement','Complaints & Appeals','Events','Document Management','Compliance Management'];
+    $cat = $_GET['cat'] ?? '';
+    if ($cat!=='' && in_array($cat,$cats,true)) { $st=$pdo->prepare("SELECT * FROM org_files WHERE category=? ORDER BY uploaded_at DESC"); $st->execute([$cat]); $rows=$st->fetchAll(); }
+    else { $rows=$pdo->query("SELECT * FROM org_files ORDER BY uploaded_at DESC")->fetchAll(); }
+    $counts=[]; foreach ($pdo->query("SELECT category,COUNT(*) c FROM org_files GROUP BY category") as $rr) $counts[$rr['category']]=$rr['c'];
+    render('management', compact('cats','cat','rows','counts'), 'Management');
+    break;
+
+case 'management_upload':
+    $pdo->exec("CREATE TABLE IF NOT EXISTS org_files (id INTEGER PRIMARY KEY AUTOINCREMENT, category TEXT, title TEXT, notes TEXT, file_path TEXT, original_name TEXT, uploaded_at TEXT)");
+    $cat=trim($_POST['category']??''); $title=trim($_POST['title']??''); $notes=trim($_POST['notes']??'');
+    try {
+        if ($title===''||$cat==='') throw new RuntimeException('Please choose a category and enter a title.');
+        if (empty($_FILES['file']['tmp_name'])||($_FILES['file']['error']??1)!==UPLOAD_ERR_OK) throw new RuntimeException('Please choose a file to upload.');
+        $dir=__DIR__.'/../data/org_files'; if(!is_dir($dir)) mkdir($dir,0775,true);
+        $orig=$_FILES['file']['name']; $safe=preg_replace('/[^A-Za-z0-9._-]+/','_',$orig);
+        $fname=date('Ymd_His').'_'.substr($safe,0,80);
+        if (!move_uploaded_file($_FILES['file']['tmp_name'], $dir.'/'.$fname)) throw new RuntimeException('Could not save the file.');
+        $pdo->prepare("INSERT INTO org_files (category,title,notes,file_path,original_name,uploaded_at) VALUES (?,?,?,?,?,datetime('now'))")
+            ->execute([$cat,$title,$notes,'org_files/'.$fname,$orig]);
+        $_SESSION['flash']='File uploaded.';
+    } catch (Throwable $e) { $_SESSION['flash']='Upload failed: '.$e->getMessage(); }
+    redirect('?r=management&cat='.urlencode($cat));
+    break;
+
+case 'management_download':
+    $f=$pdo->query("SELECT * FROM org_files WHERE id=".(int)($_GET['id']??0))->fetch();
+    if ($f) { $path=__DIR__.'/../data/'.$f['file_path'];
+        if (is_file($path)) {
+            header('Content-Type: application/octet-stream');
+            header('Content-Disposition: attachment; filename="'.basename($f['original_name']).'"');
+            header('Content-Length: '.filesize($path));
+            readfile($path); exit;
+        } }
+    http_response_code(404); echo 'File not found'; exit;
+
+case 'management_delete':
+    $f=$pdo->query("SELECT * FROM org_files WHERE id=".(int)($_GET['id']??0))->fetch();
+    if ($f) { @unlink(__DIR__.'/../data/'.$f['file_path']); $pdo->prepare("DELETE FROM org_files WHERE id=?")->execute([(int)$f['id']]); $_SESSION['flash']='File deleted.'; }
+    redirect('?r=management');
+    break;
+
 case 'certificates':
     $rows = $pdo->query("
         SELECT c.*, s.first_name, s.last_name, co.title course_title, co.code course_code
