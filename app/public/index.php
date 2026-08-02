@@ -228,23 +228,48 @@ case 'dashboard':
         SELECT co.code, co.title, COUNT(e.id) AS cnt
         FROM courses co LEFT JOIN enrolments e ON e.course_id=co.id
         GROUP BY co.id ORDER BY cnt DESC, co.title ASC")->fetchAll();
-    // Calendar events for the displayed month (?ym=YYYY-MM, default = current month)
-    $ym = $_GET['ym'] ?? date('Y-m');
-    if (!preg_match('/^\d{4}-\d{2}$/', (string)$ym)) $ym = date('Y-m');
-    $cstmt = $pdo->prepare("
-        SELECT sc.start_date, sc.start_time, sc.total_places,
-               co.title AS course_title, co.code AS course_code, l.name AS location,
+    // Class Schedule (agenda list) — day / week / month scope, ?cv=view&d=YYYY-MM-DD
+    $cv = $_GET['cv'] ?? 'month';
+    if (!in_array($cv, ['day','week','month'], true)) $cv = 'month';
+    $anchor = $_GET['d'] ?? date('Y-m-d');
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$anchor)) $anchor = date('Y-m-d');
+    $ats = strtotime($anchor);
+    if ($cv === 'day') {
+        $cStart = $cEnd = date('Y-m-d', $ats);
+        $cLabel = date('l, j F Y', $ats);
+        $cPrev  = date('Y-m-d', strtotime($anchor.' -1 day'));
+        $cNext  = date('Y-m-d', strtotime($anchor.' +1 day'));
+    } elseif ($cv === 'week') {
+        $dow    = (int)date('N', $ats);
+        $cStart = date('Y-m-d', strtotime($anchor.' -'.($dow-1).' day'));
+        $cEnd   = date('Y-m-d', strtotime($cStart.' +6 day'));
+        $cLabel = date('j M', strtotime($cStart)).' &ndash; '.date('j M Y', strtotime($cEnd));
+        $cPrev  = date('Y-m-d', strtotime($cStart.' -7 day'));
+        $cNext  = date('Y-m-d', strtotime($cStart.' +7 day'));
+    } else { // month
+        $cStart = date('Y-m-01', $ats);
+        $cEnd   = date('Y-m-t', $ats);
+        $cLabel = date('F Y', $ats);
+        $cPrev  = date('Y-m-d', strtotime($cStart.' -1 month'));
+        $cNext  = date('Y-m-d', strtotime($cStart.' +1 month'));
+    }
+    $sstmt = $pdo->prepare("
+        SELECT sc.start_date, sc.start_time, sc.end_time, sc.total_places,
+               co.title AS course_title, co.code AS course_code, l.name AS location, u.name AS trainer_name,
                (SELECT COUNT(*) FROM enrolments e WHERE e.schedule_id=sc.id) AS booked
         FROM schedules sc
         JOIN plans p ON p.id=sc.plan_id
         JOIN courses co ON co.id=p.course_id
         LEFT JOIN locations l ON l.id=sc.location_id
-        WHERE strftime('%Y-%m', sc.start_date) = ?
+        LEFT JOIN users u ON u.id=sc.trainer_id
+        WHERE date(sc.start_date) BETWEEN ? AND ?
         ORDER BY sc.start_date, sc.start_time");
-    $cstmt->execute([$ym]);
-    $cal_events = [];
-    foreach ($cstmt->fetchAll() as $ev) { $cal_events[substr((string)$ev['start_date'],0,10)][] = $ev; }
-    render('dashboard', compact('stats','expiring','pending','next_sessions','course_counts','cal_events','ym'), 'Dashboard');
+    $sstmt->execute([$cStart, $cEnd]);
+    $cal_sessions = [];
+    foreach ($sstmt->fetchAll() as $ev) { $cal_sessions[substr((string)$ev['start_date'],0,10)][] = $ev; }
+    $cal = ['view'=>$cv,'anchor'=>$anchor,'label'=>$cLabel,'prev'=>$cPrev,'next'=>$cNext,
+            'today'=>date('Y-m-d'),'sessions'=>$cal_sessions];
+    render('dashboard', compact('stats','expiring','pending','next_sessions','course_counts','cal'), 'Dashboard');
     break;
 
 case 'students':

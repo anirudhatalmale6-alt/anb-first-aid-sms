@@ -78,52 +78,55 @@
   </div>
 </div>
 
-<!-- Training calendar -->
+<!-- Class Schedule (agenda list) -->
 <?php
-  $first    = ($ym ?? date('Y-m')).'-01';
-  $firstTs  = strtotime($first);
-  $daysIn   = (int)date('t', $firstTs);
-  $startDow = (int)date('N', $firstTs);          // 1=Mon .. 7=Sun
-  $monthLbl = date('F Y', $firstTs);
-  $prevYm   = date('Y-m', strtotime($first.' -1 month'));
-  $nextYm   = date('Y-m', strtotime($first.' +1 month'));
-  $todayStr = date('Y-m-d');
-  $cal      = $cal_events ?? [];
+  $cvw = $cal['view']; $anc = $cal['anchor'];
+  $clink = fn($v,$d) => '?r=dashboard&cv='.$v.'&d='.$d;
 ?>
 <div class="card p-3 mb-4">
-  <div class="d-flex justify-content-between align-items-center mb-3">
-    <h6 class="fw-bold mb-0"><i class="bi bi-calendar3 text-primary"></i> Training calendar</h6>
-    <div class="d-flex align-items-center gap-2">
-      <a href="?r=dashboard&ym=<?= $prevYm ?>" class="btn btn-sm btn-outline-secondary"><i class="bi bi-chevron-left"></i></a>
-      <span class="fw-semibold" style="min-width:130px;text-align:center;"><?= e($monthLbl) ?></span>
-      <a href="?r=dashboard&ym=<?= $nextYm ?>" class="btn btn-sm btn-outline-secondary"><i class="bi bi-chevron-right"></i></a>
+  <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+    <h6 class="fw-bold mb-0"><i class="bi bi-calendar3 text-primary"></i> Class Schedule</h6>
+    <div class="btn-group btn-group-sm" role="group">
+      <a href="<?= $clink('day',$anc) ?>"   class="btn <?= $cvw==='day'  ?'btn-anb':'btn-outline-secondary' ?>">Day</a>
+      <a href="<?= $clink('week',$anc) ?>"  class="btn <?= $cvw==='week' ?'btn-anb':'btn-outline-secondary' ?>">Week</a>
+      <a href="<?= $clink('month',$anc) ?>" class="btn <?= $cvw==='month'?'btn-anb':'btn-outline-secondary' ?>">Month</a>
     </div>
   </div>
-  <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;">
-    <?php foreach (['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] as $dn): ?>
-      <div class="text-muted small fw-semibold text-center" style="text-transform:uppercase;letter-spacing:.03em;"><?= $dn ?></div>
-    <?php endforeach; ?>
-    <?php for ($i=1; $i<$startDow; $i++): ?><div></div><?php endfor; ?>
-    <?php for ($d=1; $d<=$daysIn; $d++):
-      $dateStr = sprintf('%s-%02d', $ym, $d);
-      $evs = $cal[$dateStr] ?? [];
-      $isToday = ($dateStr === $todayStr); ?>
-      <div style="border:1px solid <?= $isToday ? '#E53935' : '#eceaf0' ?>;border-radius:8px;min-height:88px;padding:5px 6px;<?= $isToday ? 'box-shadow:0 0 0 1px #E53935 inset;' : '' ?>">
-        <div class="small <?= $isToday ? 'fw-bold' : 'text-muted' ?>" style="<?= $isToday ? 'color:#E53935;' : '' ?>"><?= $d ?></div>
-        <?php foreach ($evs as $ev):
-          $places=(int)($ev['total_places']?:0); $bk=(int)$ev['booked']; $full=$places && $bk>=$places; ?>
-          <div class="mt-1" title="<?= e($ev['course_title'].' · '.($ev['location']?:'')) ?>"
-               style="background:<?= $full ? '#fdecea' : '#efeaf5' ?>;border-left:3px solid <?= $full ? '#E53935' : '#8e24aa' ?>;border-radius:4px;padding:2px 4px;font-size:.68rem;line-height:1.15;overflow:hidden;">
-            <span class="fw-semibold"><?= e(substr((string)$ev['start_time'],0,5)) ?></span> <?= e($ev['course_code']) ?>
-            <div style="color:#555;"><?= $bk ?><?= $places?'/'.$places:'' ?> booked</div>
-          </div>
-        <?php endforeach; ?>
-      </div>
-    <?php endfor; ?>
+  <div class="d-flex gap-3 small text-muted mb-2 flex-wrap">
+    <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#1565c0;vertical-align:middle;"></span> Classes</span>
+    <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#f9a825;vertical-align:middle;"></span> Employer classes</span>
+    <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#c62828;vertical-align:middle;"></span> Holidays</span>
   </div>
-  <div class="d-flex gap-3 mt-2 small text-muted">
-    <span><span style="display:inline-block;width:10px;height:10px;background:#8e24aa;border-radius:2px;vertical-align:middle;"></span> Session (places available)</span>
-    <span><span style="display:inline-block;width:10px;height:10px;background:#E53935;border-radius:2px;vertical-align:middle;"></span> Full</span>
+  <div class="d-flex align-items-center gap-2 mb-2">
+    <a href="<?= $clink($cvw,$cal['prev']) ?>"  class="btn btn-sm btn-outline-secondary"><i class="bi bi-chevron-left"></i></a>
+    <a href="<?= $clink($cvw,$cal['today']) ?>" class="btn btn-sm btn-outline-secondary">Today</a>
+    <a href="<?= $clink($cvw,$cal['next']) ?>"  class="btn btn-sm btn-outline-secondary"><i class="bi bi-chevron-right"></i></a>
+    <span class="fw-semibold ms-1" style="color:#2F1D3A;"><?= $cal['label'] ?></span>
+  </div>
+  <div style="max-height:340px;overflow:auto;border-top:1px solid #eee;">
+  <?php if (empty($cal['sessions'])): ?>
+    <p class="text-muted small mb-0 pt-3">No classes scheduled in this period.</p>
+  <?php else: foreach ($cal['sessions'] as $date=>$evs): $dts = strtotime($date); ?>
+    <div class="fw-semibold small text-muted mt-2 mb-1" style="text-transform:uppercase;letter-spacing:.03em;"><?= date('l, j F Y', $dts) ?></div>
+    <?php foreach ($evs as $ev):
+      $st = !empty($ev['start_time']) ? date('g:iA', strtotime((string)$ev['start_time'])) : '';
+      $et = !empty($ev['end_time'])   ? date('g:iA', strtotime((string)$ev['end_time']))   : '';
+      $tr = $st.($et ? ' - '.$et : '');
+      $places=(int)($ev['total_places']?:0); $bk=(int)$ev['booked']; $full=$places && $bk>=$places; ?>
+      <div class="d-flex align-items-start py-2" style="border-bottom:1px solid #f1f0f3;">
+        <div class="small text-muted" style="width:118px;flex:0 0 118px;white-space:nowrap;"><?= e($tr) ?></div>
+        <div class="me-2" style="margin-top:4px;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#1565c0;"></span></div>
+        <div class="small" style="color:#1565c0;line-height:1.3;">
+          <span class="fw-semibold"><?= e($ev['course_code']) ?></span> <?= e($ev['course_title']) ?><?php
+            if(!empty($ev['location'])) echo ' at '.e($ev['location']);
+            if(!empty($ev['trainer_name'])) echo ' with '.e($ev['trainer_name']);
+            if($st) echo ' at '.e($st);
+          ?>
+          <span class="badge <?= $full?'text-bg-danger':'text-bg-light border' ?> ms-1"><?= $bk ?><?= $places?'/'.$places:'' ?> booked</span>
+        </div>
+      </div>
+    <?php endforeach; ?>
+  <?php endforeach; endif; ?>
   </div>
 </div>
 
