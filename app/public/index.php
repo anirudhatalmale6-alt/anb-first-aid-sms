@@ -210,7 +210,41 @@ case 'dashboard':
         SELECT e.*, s.first_name, s.last_name, co.title AS course_title
         FROM enrolments e JOIN students s ON s.id=e.student_id JOIN courses co ON co.id=e.course_id
         WHERE e.status='complete' ORDER BY e.end_date DESC")->fetchAll();
-    render('dashboard', compact('stats','expiring','pending'), 'Dashboard');
+    // Next training dates (upcoming sessions with how many booked)
+    $next_sessions = $pdo->query("
+        SELECT sc.*, co.title AS course_title, co.code AS course_code, l.name AS location,
+               u.name AS trainer_name,
+               (SELECT COUNT(*) FROM enrolments e WHERE e.schedule_id=sc.id) AS booked
+        FROM schedules sc
+        JOIN plans p ON p.id=sc.plan_id
+        JOIN courses co ON co.id=p.course_id
+        LEFT JOIN locations l ON l.id=sc.location_id
+        LEFT JOIN users u ON u.id=sc.trainer_id
+        WHERE date(sc.start_date) >= date('now')
+        ORDER BY date(sc.start_date) ASC, sc.start_time ASC
+        LIMIT 8")->fetchAll();
+    // How many students in each course
+    $course_counts = $pdo->query("
+        SELECT co.code, co.title, COUNT(e.id) AS cnt
+        FROM courses co LEFT JOIN enrolments e ON e.course_id=co.id
+        GROUP BY co.id ORDER BY cnt DESC, co.title ASC")->fetchAll();
+    // Calendar events for the displayed month (?ym=YYYY-MM, default = current month)
+    $ym = $_GET['ym'] ?? date('Y-m');
+    if (!preg_match('/^\d{4}-\d{2}$/', (string)$ym)) $ym = date('Y-m');
+    $cstmt = $pdo->prepare("
+        SELECT sc.start_date, sc.start_time, sc.total_places,
+               co.title AS course_title, co.code AS course_code, l.name AS location,
+               (SELECT COUNT(*) FROM enrolments e WHERE e.schedule_id=sc.id) AS booked
+        FROM schedules sc
+        JOIN plans p ON p.id=sc.plan_id
+        JOIN courses co ON co.id=p.course_id
+        LEFT JOIN locations l ON l.id=sc.location_id
+        WHERE strftime('%Y-%m', sc.start_date) = ?
+        ORDER BY sc.start_date, sc.start_time");
+    $cstmt->execute([$ym]);
+    $cal_events = [];
+    foreach ($cstmt->fetchAll() as $ev) { $cal_events[substr((string)$ev['start_date'],0,10)][] = $ev; }
+    render('dashboard', compact('stats','expiring','pending','next_sessions','course_counts','cal_events','ym'), 'Dashboard');
     break;
 
 case 'students':
