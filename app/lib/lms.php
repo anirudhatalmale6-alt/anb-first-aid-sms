@@ -104,6 +104,7 @@ function lms_all_modules(PDO $p): array {
         SELECT m.*, co.code course_code, co.title course_title,
           (SELECT COUNT(*) FROM quiz_questions q WHERE q.module_id=m.id) question_count
         FROM course_modules m JOIN courses co ON co.id=m.course_id
+        WHERE m.active=1
         ORDER BY co.code, m.position, m.id")->fetchAll();
 }
 
