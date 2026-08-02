@@ -10,11 +10,15 @@
 <style>
   :root{ --anb:#E53935; --anb-dark:#2F1D3A; }
   body{ background:#f4f5f7; }
-  .sidebar{ background:var(--anb-dark); min-height:100vh; width:240px; position:fixed; }
-  .sidebar .brand{ color:#fff; font-weight:700; font-size:1.05rem; padding:18px 20px; border-bottom:1px solid rgba(255,255,255,.12); }
+  .sidebar{ background:var(--anb-dark); width:240px; position:fixed; top:0; left:0; height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+  .sidebar .brand{ color:#fff; font-weight:700; font-size:1.05rem; padding:16px 20px; border-bottom:1px solid rgba(255,255,255,.12); flex:0 0 auto; }
   .sidebar .brand small{ color:#e0a; }
-  .sidebar a{ color:#cfc9d6; display:flex; gap:10px; align-items:center; padding:11px 20px; text-decoration:none; font-size:.94rem; }
+  .sidebar .nav-scroll{ flex:1 1 auto; overflow-y:auto; overflow-x:hidden; }
+  .sidebar .nav-scroll::-webkit-scrollbar{ width:6px; }
+  .sidebar .nav-scroll::-webkit-scrollbar-thumb{ background:rgba(255,255,255,.2); border-radius:3px; }
+  .sidebar a{ color:#cfc9d6; display:flex; gap:10px; align-items:center; padding:9px 20px; text-decoration:none; font-size:.9rem; }
   .sidebar a:hover, .sidebar a.active{ background:rgba(255,255,255,.08); color:#fff; border-left:3px solid var(--anb); }
+  .sidebar .signout{ flex:0 0 auto; border-top:1px solid rgba(255,255,255,.12); }
   .content{ margin-left:240px; padding:26px 32px; }
   .topbar{ display:flex; justify-content:space-between; align-items:center; margin-bottom:22px; }
   .stat-card{ border:none; border-radius:14px; box-shadow:0 4px 14px rgba(0,0,0,.05); }
@@ -30,6 +34,7 @@
 <?php if ($u): $r = $_GET['r'] ?? 'dashboard'; ?>
 <div class="sidebar">
   <div class="brand"><span class="logo-badge">A&amp;B</span> First Aid<br><small>Training SMS</small></div>
+  <div class="nav-scroll">
   <a href="?r=dashboard"    class="<?= $r==='dashboard'?'active':'' ?>"><i class="bi bi-speedometer2"></i> Dashboard</a>
   <a href="?r=trainer"      class="<?= $r==='trainer'?'active':'' ?>"><i class="bi bi-clipboard2-pulse"></i> Trainer</a>
   <a href="?r=students"     class="<?= $r==='students'||$r==='student'?'active':'' ?>"><i class="bi bi-people"></i> Students</a>
@@ -44,7 +49,8 @@
   <a href="?r=avetmiss"     class="<?= $r==='avetmiss'?'active':'' ?>"><i class="bi bi-file-earmark-bar-graph"></i> AVETMISS</a>
   <a href="?r=emails"       class="<?= $r==='emails'?'active':'' ?>"><i class="bi bi-envelope-paper"></i> Email Templates</a>
   <a href="?r=management"   class="<?= in_array($r,['management'],true)?'active':'' ?>"><i class="bi bi-folder2-open"></i> Management</a>
-  <a href="?r=logout" style="margin-top:20px;border-top:1px solid rgba(255,255,255,.12)"><i class="bi bi-box-arrow-right"></i> Sign out</a>
+  </div>
+  <a href="?r=logout" class="signout"><i class="bi bi-box-arrow-right"></i> Sign out</a>
 </div>
 <div class="content">
   <?= $content ?>
