@@ -46,7 +46,8 @@
     <div class="card p-3">
       <h6 class="fw-bold mb-3"><i class="bi bi-mortarboard text-primary"></i> My Courses &amp; Online Learning</h6>
       <?php foreach ($enrolments as $en):
-        $pct = $en['online_complete'] ? 100 : ($en['status']==='enrolled' ? 40 : 100);
+        $total = (int)($en['modules_total'] ?? 0); $doneN = (int)($en['modules_done'] ?? 0);
+        $pct = $total ? (int)round($doneN/$total*100) : ($en['online_complete'] ? 100 : ($en['status']==='enrolled' ? 40 : 100));
       ?>
         <div class="border rounded p-3 mb-2">
           <div class="d-flex justify-content-between align-items-start">
@@ -58,11 +59,28 @@
             <?= status_badge($en['status']) ?>
           </div>
           <div class="mt-2">
-            <div class="d-flex justify-content-between small text-muted"><span>Online learning</span><span><?= $pct ?>%</span></div>
+            <div class="d-flex justify-content-between small text-muted"><span>Online learning<?= $total?" ($doneN/$total modules)":'' ?></span><span><?= $pct ?>%</span></div>
             <div class="progress" style="height:8px;"><div class="progress-bar bg-success" style="width:<?= $pct ?>%"></div></div>
           </div>
-          <?php if (!$en['online_complete']): ?>
-            <a href="#" class="btn btn-sm btn-outline-danger mt-2"><i class="bi bi-play-circle"></i> Continue online learning</a>
+          <?php if (!empty($en['modules'])): ?>
+            <div class="mt-2">
+            <?php foreach ($en['modules'] as $m): $status = $m['progress']['status'] ?? 'not_started';
+              $done = $status==='completed'; ?>
+              <div class="d-flex justify-content-between align-items-center py-1">
+                <div class="small">
+                  <i class="bi <?= $m['type']==='quiz'?'bi-ui-checks-grid':'bi-play-btn' ?> text-muted"></i>
+                  <?= e($m['title']) ?>
+                  <?php if ($done): ?><span class="badge text-bg-success ms-1">Completed<?= $m['progress']['score']!==null?' · '.(int)$m['progress']['score'].'%':'' ?></span>
+                  <?php elseif ($status==='in_progress'): ?><span class="badge text-bg-warning ms-1">In progress</span><?php endif; ?>
+                </div>
+                <a href="?r=learn&module_id=<?= (int)$m['id'] ?>" class="btn btn-sm <?= $done?'btn-outline-secondary':'btn-outline-danger' ?>">
+                  <i class="bi <?= $done?'bi-arrow-repeat':'bi-play-circle' ?>"></i> <?= $done?'Review':($status==='in_progress'?'Resume':'Start') ?>
+                </a>
+              </div>
+            <?php endforeach; ?>
+            </div>
+          <?php elseif (!$en['online_complete']): ?>
+            <div class="text-muted small mt-2">No online modules assigned to this course yet.</div>
           <?php endif; ?>
         </div>
       <?php endforeach; if(!$enrolments): ?><p class="text-muted small mb-0">You have no active courses.</p><?php endif; ?>

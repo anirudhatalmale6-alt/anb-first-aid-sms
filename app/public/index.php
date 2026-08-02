@@ -113,9 +113,75 @@ if (in_array($r, ['my','mycert'], true)) {
         LEFT JOIN schedules sc ON sc.id=e.schedule_id LEFT JOIN locations l ON l.id=e.location_id
         WHERE e.student_id=? ORDER BY e.start_date DESC");
     $enr->execute([$sid]); $enrolments = $enr->fetchAll();
+    // attach online modules (SCORM/quiz) + this learner's progress to each enrolment
+    require_once __DIR__ . '/../lib/lms.php';
+    lms_ensure_schema($pdo); lms_seed_demo($pdo);
+    foreach ($enrolments as &$en) {
+        $mods = lms_course_modules($pdo, (int)$en['course_id']);
+        $prog = lms_progress_for_enrolment($pdo, (int)$en['id']);
+        $done = 0;
+        foreach ($mods as &$m) {
+            $m['progress'] = $prog[(int)$m['id']] ?? null;
+            if (($m['progress']['status'] ?? '') === 'completed') $done++;
+        }
+        unset($m);
+        $en['modules'] = $mods;
+        $en['modules_done'] = $done;
+        $en['modules_total'] = count($mods);
+    }
+    unset($en);
     $ct = $pdo->prepare("SELECT c.*, co.title course_title FROM certificates c JOIN enrolments e ON e.id=c.enrolment_id JOIN courses co ON co.id=e.course_id WHERE c.student_id=? ORDER BY c.issue_date DESC");
     $ct->execute([$sid]); $mycerts = $ct->fetchAll();
     render('portal', compact('me','enrolments','mycerts'), 'My Learning');
+    exit;
+}
+
+/* ============ LMS player: online modules (SCORM + quiz) — learner or admin preview ============ */
+if (in_array($r, ['learn','scorm_track','quiz_submit'], true)) {
+    require __DIR__ . '/../lib/lms.php';
+    $pdo = db();
+    lms_ensure_schema($pdo); lms_seed_demo($pdo);
+
+    $isStudent = !empty($_SESSION['student_id']);
+    $isStaff   = !empty($_SESSION['uid']);
+    if (!$isStudent && !$isStaff) redirect('?r=student_login');
+
+    $moduleId = (int)($_GET['module_id'] ?? $_POST['module_id'] ?? 0);
+    $module = lms_module($pdo, $moduleId);
+    if (!$module) { http_response_code(404); echo 'Module not found'; exit; }
+
+    // learner's enrolment for this module's course (null when staff previews)
+    $enrolment = null;
+    if ($isStudent) {
+        $eq = $pdo->prepare("SELECT * FROM enrolments WHERE student_id=? AND course_id=? ORDER BY id DESC LIMIT 1");
+        $eq->execute([(int)$_SESSION['student_id'], (int)$module['course_id']]);
+        $enrolment = $eq->fetch() ?: null;
+    }
+
+    if ($r === 'scorm_track') {
+        header('Content-Type: application/json');
+        if ($enrolment) {
+            $status = ($_POST['status'] ?? '') === 'completed' ? 'completed' : 'in_progress';
+            $score  = (isset($_POST['score']) && $_POST['score'] !== '') ? (float)$_POST['score'] : null;
+            lms_record_progress($pdo, (int)$enrolment['id'], $moduleId, $status, $score);
+            echo json_encode(['ok'=>true,'status'=>$status]);
+        } else { echo json_encode(['ok'=>true,'preview'=>true]); }
+        exit;
+    }
+
+    if ($r === 'quiz_submit') {
+        $questions = lms_questions($pdo, $moduleId);
+        [$pct,$correct,$total,$per] = lms_grade_quiz($questions, $_POST['a'] ?? []);
+        $passed = $pct >= (int)$module['pass_mark'];
+        if ($enrolment) lms_record_progress($pdo, (int)$enrolment['id'], $moduleId, $passed?'completed':'in_progress', (float)$pct);
+        render('learn', ['module'=>$module,'enrolment'=>$enrolment,'questions'=>$questions,
+                         'quizResult'=>compact('pct','correct','total','per','passed')], $module['title']);
+        exit;
+    }
+
+    // r === 'learn'
+    $questions = $module['type']==='quiz' ? lms_questions($pdo, $moduleId) : [];
+    render('learn', compact('module','enrolment','questions'), $module['title']);
     exit;
 }
 
@@ -367,6 +433,101 @@ case 'avetmiss_preview':
     header('Content-Type: text/plain; charset=utf-8');
     echo $files[$file] ?? '';
     exit;
+
+case 'content':
+    require __DIR__ . '/../lib/lms.php';
+    lms_ensure_schema($pdo); lms_seed_demo($pdo);
+    $modules = lms_all_modules($pdo);
+    $courses = $pdo->query("SELECT id,code,title FROM courses ORDER BY code")->fetchAll();
+    render('content', compact('modules','courses'), 'Course Content (LMS)');
+    break;
+
+case 'content_upload':
+    require __DIR__ . '/../lib/lms.php';
+    lms_ensure_schema($pdo);
+    $courseId = (int)($_POST['course_id'] ?? 0);
+    $title    = trim($_POST['title'] ?? '');
+    try {
+        if (!$courseId || $title === '') throw new RuntimeException('Please choose a course and give the module a title.');
+        if (empty($_FILES['scorm']['tmp_name']) || ($_FILES['scorm']['error'] ?? 1) !== UPLOAD_ERR_OK)
+            throw new RuntimeException('Please choose a SCORM .zip file to upload.');
+        $slug = 'mod-'.trim(preg_replace('/[^a-z0-9]+/','-', strtolower($title)),'-');
+        [$dir,$launch] = lms_import_scorm_zip($_FILES['scorm']['tmp_name'], $slug ?: 'mod');
+        $pos = (int)$pdo->query("SELECT COALESCE(MAX(position),0)+1 FROM course_modules")->fetchColumn();
+        $pdo->prepare("INSERT INTO course_modules (course_id,title,type,scorm_dir,launch_url,position) VALUES (?,?,'scorm',?,?,?)")
+            ->execute([$courseId,$title,$dir,$launch,$pos]);
+        $_SESSION['flash'] = 'SCORM package uploaded and ready to launch.';
+    } catch (Throwable $ex) { $_SESSION['flash'] = 'Upload failed: '.$ex->getMessage(); }
+    redirect('?r=content');
+    break;
+
+case 'module_new':   // create an empty quiz module then open the builder
+    require __DIR__ . '/../lib/lms.php';
+    lms_ensure_schema($pdo);
+    $courseId = (int)($_POST['course_id'] ?? 0);
+    $title    = trim($_POST['title'] ?? '') ?: 'Knowledge Check';
+    $pass     = (int)($_POST['pass_mark'] ?? 80);
+    if ($courseId) {
+        $pos = (int)$pdo->query("SELECT COALESCE(MAX(position),0)+1 FROM course_modules")->fetchColumn();
+        $pdo->prepare("INSERT INTO course_modules (course_id,title,type,pass_mark,position) VALUES (?,?,'quiz',?,?)")
+            ->execute([$courseId,$title,$pass,$pos]);
+        redirect('?r=quiz_edit&id='.$pdo->lastInsertId());
+    }
+    redirect('?r=content');
+    break;
+
+case 'quiz_edit':
+    require __DIR__ . '/../lib/lms.php';
+    lms_ensure_schema($pdo);
+    $id = (int)($_GET['id'] ?? 0); $module = lms_module($pdo, $id);
+    if (!$module || $module['type'] !== 'quiz') { http_response_code(404); echo 'Quiz not found'; break; }
+    $questions = lms_questions($pdo, $id);
+    render('quiz_edit', compact('module','questions'), 'Edit quiz');
+    break;
+
+case 'quiz_save':    // replace-all save from the builder
+    require __DIR__ . '/../lib/lms.php';
+    lms_ensure_schema($pdo);
+    $id = (int)($_POST['module_id'] ?? 0); $module = lms_module($pdo, $id);
+    if ($module) {
+        $pdo->prepare("UPDATE course_modules SET title=?, pass_mark=? WHERE id=?")
+            ->execute([trim($_POST['title'] ?? $module['title']) ?: $module['title'], (int)($_POST['pass_mark'] ?? 80), $id]);
+        $pdo->prepare("DELETE FROM quiz_questions WHERE module_id=?")->execute([$id]);
+        $pos = 0;
+        foreach (($_POST['q'] ?? []) as $qd) {
+            $qtext = trim($qd['question'] ?? ''); if ($qtext === '') continue;
+            $qtype = in_array($qd['qtype'] ?? 'single', ['single','multi','truefalse'], true) ? $qd['qtype'] : 'single';
+            $opts = []; $correct = [];
+            if ($qtype === 'truefalse') {
+                $opts = ['True','False'];
+                $correct = (($qd['correct_single'] ?? '1') === '0') ? [0] : [1];
+            } else {
+                foreach (($qd['opt'] ?? []) as $oi => $otext) {
+                    $otext = trim($otext); if ($otext === '') continue;
+                    $idx = count($opts); $opts[] = $otext;
+                    if ($qtype === 'single') {
+                        if ((string)($qd['correct_single'] ?? '') === (string)$oi) $correct[] = $idx;
+                    } else { // multi
+                        if (isset($qd['correct'][$oi])) $correct[] = $idx;
+                    }
+                }
+            }
+            if (!$opts) continue;
+            $pdo->prepare("INSERT INTO quiz_questions (module_id,question,qtype,options,correct,position) VALUES (?,?,?,?,?,?)")
+                ->execute([$id,$qtext,$qtype,json_encode($opts),json_encode($correct),++$pos]);
+        }
+        $_SESSION['flash'] = 'Quiz saved.';
+    }
+    redirect('?r=quiz_edit&id='.$id);
+    break;
+
+case 'module_delete':
+    require __DIR__ . '/../lib/lms.php';
+    lms_ensure_schema($pdo);
+    $pdo->prepare("UPDATE course_modules SET active=0 WHERE id=?")->execute([(int)($_GET['id'] ?? 0)]);
+    $_SESSION['flash'] = 'Module removed.';
+    redirect('?r=content');
+    break;
 
 default:
     http_response_code(404); echo 'Page not found';

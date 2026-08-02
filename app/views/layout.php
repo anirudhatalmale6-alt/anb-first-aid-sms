@@ -36,6 +36,7 @@
   <a href="?r=enrolments"   class="<?= $r==='enrolments'?'active':'' ?>"><i class="bi bi-journal-check"></i> Enrolments</a>
   <a href="?r=schedules"    class="<?= $r==='schedules'?'active':'' ?>"><i class="bi bi-calendar3"></i> Schedules</a>
   <a href="?r=courses"      class="<?= $r==='courses'?'active':'' ?>"><i class="bi bi-mortarboard"></i> Courses</a>
+  <a href="?r=content"      class="<?= in_array($r,['content','quiz_edit'],true)?'active':'' ?>"><i class="bi bi-collection-play"></i> Course Content</a>
   <a href="?r=certificates" class="<?= $r==='certificates'?'active':'' ?>"><i class="bi bi-award"></i> Certificates</a>
   <a href="?r=surveys"      class="<?= $r==='surveys'||$r==='survey_view'?'active':'' ?>"><i class="bi bi-ui-checks"></i> Survey Reporting</a>
   <a href="?r=reminders"    class="<?= $r==='reminders'?'active':'' ?>"><i class="bi bi-bell"></i> Renewal Reminders</a>

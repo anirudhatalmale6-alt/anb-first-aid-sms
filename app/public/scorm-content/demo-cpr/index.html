@@ -1,0 +1,67 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CPR Online Module</title>
+<style>
+ body{font-family:system-ui,Arial,sans-serif;margin:0;background:#faf7fb;color:#2F1D3A}
+ .wrap{max-width:640px;margin:0 auto;padding:24px}
+ .card{background:#fff;border-radius:14px;box-shadow:0 4px 14px rgba(0,0,0,.06);padding:24px;margin-bottom:16px}
+ h1{font-size:1.35rem} h2{font-size:1.05rem;color:#E53935}
+ .btn{background:#E53935;color:#fff;border:0;border-radius:8px;padding:10px 18px;font-size:1rem;cursor:pointer}
+ .btn:disabled{opacity:.5;cursor:default}
+ .ok{color:#2e7d32;font-weight:600}
+ .bar{height:8px;background:#eee;border-radius:6px;overflow:hidden;margin:10px 0}
+ .bar>div{height:100%;background:#2e7d32;width:0;transition:width .4s}
+</style></head>
+<body>
+<script>
+// Locate the SCORM 1.2 API provided by the LMS wrapper (parent window chain).
+function findAPI(w){var n=0;while(w&&!w.API&&w.parent&&w.parent!=w&&n++<10)w=w.parent;return w?w.API:null;}
+var API=findAPI(window)||(window.opener?findAPI(window.opener):null);
+function set(k,v){if(API)try{API.LMSSetValue(k,v);}catch(e){}}
+if(API){try{API.LMSInitialize("");}catch(e){}set("cmi.core.lesson_status","incomplete");try{API.LMSCommit("");}catch(e){}}
+var page=0,pages=3;
+function render(){
+  document.getElementById('bar').style.width=Math.round(page/pages*100)+'%';
+}
+function next(){
+  page++;
+  document.getElementById('p'+page).style.display='block';
+  if(page>1)document.getElementById('p'+(page-1)).style.display='none';
+  render();
+  if(page>=pages){document.getElementById('finish').style.display='inline-block';}
+}
+function finish(){
+  set("cmi.core.lesson_status","completed");
+  set("cmi.core.score.raw","100");
+  if(API){try{API.LMSCommit("");}catch(e){}try{API.LMSFinish("");}catch(e){}}
+  document.getElementById('done').style.display='block';
+  document.getElementById('finish').disabled=true;
+}
+window.onload=render;
+</script>
+<div class="wrap">
+ <div class="card"><h1>CPR Online Module</h1>
+  <div class="bar"><div id="bar"></div></div>
+  <div id="p0">
+    <h2>1. Danger &amp; Response</h2>
+    <p>Before approaching, check for danger to yourself, bystanders and the casualty. Then check for a response — talk and touch (squeeze the shoulders).</p>
+    <button class="btn" onclick="next()">Next</button>
+  </div>
+  <div id="p1" style="display:none">
+    <h2>2. Airway &amp; Breathing</h2>
+    <p>Open the airway with a head-tilt/chin-lift. Look, listen and feel for normal breathing for up to 10 seconds.</p>
+    <button class="btn" onclick="next()">Next</button>
+  </div>
+  <div id="p2" style="display:none">
+    <h2>3. Compressions</h2>
+    <p>If not breathing normally, start CPR: 30 compressions to 2 breaths, at a rate of 100–120 per minute, pressing one-third of chest depth.</p>
+    <button class="btn" onclick="next()">Next</button>
+  </div>
+  <div id="p3" style="display:none">
+    <h2>Well done!</h2>
+    <p>You've completed the CPR online module. Click Finish to record your completion.</p>
+  </div>
+  <button id="finish" class="btn" style="display:none" onclick="finish()">Finish &amp; record completion</button>
+  <p id="done" class="ok" style="display:none">✓ Completion recorded. You can close this window.</p>
+ </div>
+</div>
+</body></html>
