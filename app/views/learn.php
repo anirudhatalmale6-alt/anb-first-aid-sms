@@ -18,7 +18,91 @@ $isPreview = empty($enrolment);
     <div class="alert alert-info py-2 small"><i class="bi bi-eye"></i> Preview mode (staff) — progress is not recorded.</div>
   <?php endif; ?>
 
-  <?php if ($module['type'] === 'scorm'):
+  <?php if ($module['type'] === 'incident_report'):
+      $fv = $submission['fields'] ?? [];
+      $ro = !empty($readonly); $dis = $ro ? 'disabled' : '';
+      $natureOpts = ['Abrasion, scrapes','Amputation','Broken bone','Bruise','Burn (heat)','Burn (chemical)',
+        'Concussion (to the head)','Crushing Injury','Cut, laceration, puncture','Hernia','Illness',
+        'Sprain, strain','Damage to a body system','Shock'];
+      $natureSel = (array)($fv['nature'] ?? []);
+      $V = static function($k) use ($fv){ return e($fv[$k] ?? ''); };
+  ?>
+    <?php if (!empty($justSaved)): ?>
+      <div class="alert alert-success"><i class="bi bi-check-circle-fill"></i> Your incident report has been submitted<?= $isPreview?' (preview - not saved)':' and saved to your assessment' ?>. You can update and resubmit any time before your class.</div>
+    <?php endif; ?>
+    <?php if ($ro && !empty($viewStudent)): ?>
+      <div class="alert alert-secondary py-2"><i class="bi bi-person"></i> Submission by <strong><?= e($viewStudent['first_name'].' '.$viewStudent['last_name']) ?></strong><?= !empty($submission['updated_at'])?' &middot; '.e($submission['updated_at']):'' ?></div>
+    <?php endif; ?>
+
+    <?php if (!empty($module['body'])): ?>
+      <div class="card p-3 mb-3" style="border-left:4px solid #E53935;">
+        <h6 class="fw-bold mb-2" style="color:#2F1D3A;"><i class="bi bi-clipboard2-pulse text-danger"></i> First Aid Practical Scenario</h6>
+        <div class="small" style="white-space:pre-line;"><?= e($module['body']) ?></div>
+      </div>
+    <?php endif; ?>
+
+    <form method="post" action="?r=form_submit">
+      <input type="hidden" name="module_id" value="<?= (int)$module['id'] ?>">
+      <div class="card p-3 mb-3">
+        <h6 class="fw-bold mb-3" style="color:#2F1D3A;">Incident Report</h6>
+        <div class="row g-2">
+          <div class="col-md-4"><label class="form-label small fw-semibold">Date</label><input <?=$dis?>name="f[date]" class="form-control form-control-sm" value="<?= $V('date') ?>"></div>
+          <div class="col-md-4"><label class="form-label small fw-semibold">Time</label><input <?=$dis?>name="f[time]" class="form-control form-control-sm" value="<?= $V('time') ?>"></div>
+          <div class="col-md-4"><label class="form-label small fw-semibold">Location of incident</label><input <?=$dis?>name="f[location]" class="form-control form-control-sm" value="<?= $V('location') ?>"></div>
+        </div>
+        <hr class="my-3">
+        <div class="row g-2">
+          <div class="col-md-4"><label class="form-label small fw-semibold">Surname</label><input <?=$dis?>name="f[surname]" class="form-control form-control-sm" value="<?= $V('surname') ?>"></div>
+          <div class="col-md-4"><label class="form-label small fw-semibold">Given name</label><input <?=$dis?>name="f[given_name]" class="form-control form-control-sm" value="<?= $V('given_name') ?>"></div>
+          <div class="col-md-2"><label class="form-label small fw-semibold">Sex</label>
+            <select <?=$dis?>name="f[sex]" class="form-select form-select-sm">
+              <?php foreach (['','Female','Male'] as $sx): ?><option <?= (($fv['sex']??'')===$sx)?'selected':'' ?>><?= $sx ?></option><?php endforeach; ?>
+            </select></div>
+          <div class="col-md-2"><label class="form-label small fw-semibold">DOB</label><input <?=$dis?>name="f[dob]" class="form-control form-control-sm" value="<?= $V('dob') ?>"></div>
+        </div>
+        <div class="row g-2 mt-1">
+          <div class="col-md-8"><label class="form-label small fw-semibold">Address</label><input <?=$dis?>name="f[address]" class="form-control form-control-sm" value="<?= $V('address') ?>"></div>
+          <div class="col-md-4"><label class="form-label small fw-semibold">Postcode</label><input <?=$dis?>name="f[postcode]" class="form-control form-control-sm" value="<?= $V('postcode') ?>"></div>
+        </div>
+        <div class="row g-2 mt-1">
+          <div class="col-md-6"><label class="form-label small fw-semibold">Allergies</label><input <?=$dis?>name="f[allergies]" class="form-control form-control-sm" value="<?= $V('allergies') ?>"></div>
+          <div class="col-md-6"><label class="form-label small fw-semibold">Medications</label><input <?=$dis?>name="f[medications]" class="form-control form-control-sm" value="<?= $V('medications') ?>"></div>
+        </div>
+        <div class="mt-2"><label class="form-label small fw-semibold">Incident / Injury</label><input <?=$dis?>name="f[incident_injury]" class="form-control form-control-sm" value="<?= $V('incident_injury') ?>"></div>
+        <div class="mt-2"><label class="form-label small fw-semibold">Part of the body affected</label><input <?=$dis?>name="f[body_part]" class="form-control form-control-sm" value="<?= $V('body_part') ?>"></div>
+
+        <label class="form-label small fw-semibold mt-3">Nature of injury (most serious) — tick all that apply</label>
+        <div class="row g-1">
+          <?php foreach ($natureOpts as $no): ?>
+            <div class="col-md-4 col-sm-6">
+              <label class="d-block small"><input <?=$dis?>class="form-check-input me-1" type="checkbox" name="f[nature][]" value="<?= e($no) ?>" <?= in_array($no,$natureSel,true)?'checked':'' ?>> <?= e($no) ?></label>
+            </div>
+          <?php endforeach; ?>
+        </div>
+      </div>
+
+      <div class="card p-3 mb-3">
+        <label class="form-label small fw-semibold">Assessment — identify the injury type, recognise the condition developing, and describe the correct first aid management (minor wound + shock)</label>
+        <textarea <?=$dis?>name="f[assessment_answer]" class="form-control" rows="5"><?= $V('assessment_answer') ?></textarea>
+        <label class="form-label small fw-semibold mt-3">Treatment given</label>
+        <textarea <?=$dis?>name="f[treatment]" class="form-control" rows="3"><?= $V('treatment') ?></textarea>
+        <label class="form-label small fw-semibold mt-3">Incident outcome</label>
+        <textarea <?=$dis?>name="f[outcome]" class="form-control" rows="2"><?= $V('outcome') ?></textarea>
+        <div class="row g-2 mt-1">
+          <div class="col-md-4"><label class="form-label small fw-semibold">Incident reported to</label><input <?=$dis?>name="f[reported_to]" class="form-control form-control-sm" value="<?= $V('reported_to') ?>"></div>
+          <div class="col-md-4"><label class="form-label small fw-semibold">Name of first aider</label><input <?=$dis?>name="f[first_aider]" class="form-control form-control-sm" value="<?= $V('first_aider') ?>"></div>
+          <div class="col-md-4"><label class="form-label small fw-semibold">Signature (type your name)</label><input <?=$dis?>name="f[signature]" class="form-control form-control-sm" value="<?= $V('signature') ?>"></div>
+        </div>
+      </div>
+
+      <?php if (!$ro): ?>
+        <button class="btn btn-anb w-100 mb-4"><i class="bi bi-send"></i> <?= $submission ? 'Update &amp; resubmit report' : 'Submit incident report' ?></button>
+      <?php else: ?>
+        <a href="<?= e($backUrl) ?>" class="btn btn-outline-secondary mb-4"><i class="bi bi-arrow-left"></i> Back</a>
+      <?php endif; ?>
+    </form>
+
+  <?php elseif ($module['type'] === 'scorm'):
       $src = '/'.lms_scorm_url_prefix().'/'.trim($module['scorm_dir'],'/').'/'.ltrim($module['launch_url'],'/');
   ?>
     <div class="card p-2 mb-2">

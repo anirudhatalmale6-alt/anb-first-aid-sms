@@ -35,6 +35,7 @@
   <a href="?r=students"     class="<?= $r==='students'||$r==='student'?'active':'' ?>"><i class="bi bi-people"></i> Students</a>
   <a href="?r=enrolments"   class="<?= $r==='enrolments'?'active':'' ?>"><i class="bi bi-journal-check"></i> Enrolments</a>
   <a href="?r=schedules"    class="<?= $r==='schedules'?'active':'' ?>"><i class="bi bi-calendar3"></i> Schedules</a>
+  <a href="?r=locations"    class="<?= $r==='locations'?'active':'' ?>"><i class="bi bi-geo-alt"></i> Locations</a>
   <a href="?r=courses"      class="<?= $r==='courses'?'active':'' ?>"><i class="bi bi-mortarboard"></i> Courses</a>
   <a href="?r=content"      class="<?= in_array($r,['content','quiz_edit'],true)?'active':'' ?>"><i class="bi bi-collection-play"></i> Course Content</a>
   <a href="?r=certificates" class="<?= $r==='certificates'?'active':'' ?>"><i class="bi bi-award"></i> Certificates</a>

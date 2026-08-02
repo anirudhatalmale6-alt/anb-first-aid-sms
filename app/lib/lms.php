@@ -49,7 +49,53 @@ function lms_ensure_schema(PDO $p): void {
         updated_at TEXT,
         UNIQUE(enrolment_id, module_id)
     );
+    CREATE TABLE IF NOT EXISTS form_submissions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        enrolment_id INTEGER NOT NULL,
+        module_id INTEGER NOT NULL,
+        data TEXT,                             -- JSON of field => value
+        updated_at TEXT,
+        UNIQUE(enrolment_id, module_id)
+    );
     ");
+    // course_modules.body holds scenario/instructions for incident_report modules
+    try { $p->exec("ALTER TABLE course_modules ADD COLUMN body TEXT"); } catch (Throwable $e) {}
+}
+
+/** Get a learner's saved form submission (assoc) or null. */
+function lms_form_submission(PDO $p, int $enrolmentId, int $moduleId): ?array {
+    $st = $p->prepare("SELECT * FROM form_submissions WHERE enrolment_id=? AND module_id=?");
+    $st->execute([$enrolmentId, $moduleId]);
+    $row = $st->fetch();
+    if (!$row) return null;
+    $row['fields'] = (array)json_decode($row['data'] ?? '{}', true);
+    return $row;
+}
+
+/** Save/replace a learner's form submission. */
+function lms_save_form_submission(PDO $p, int $enrolmentId, int $moduleId, array $data): void {
+    $json = json_encode($data, JSON_UNESCAPED_UNICODE);
+    $now = date('Y-m-d H:i:s');
+    $ex = $p->prepare("SELECT id FROM form_submissions WHERE enrolment_id=? AND module_id=?");
+    $ex->execute([$enrolmentId, $moduleId]);
+    if ($id = $ex->fetchColumn()) {
+        $p->prepare("UPDATE form_submissions SET data=?, updated_at=? WHERE id=?")->execute([$json,$now,(int)$id]);
+    } else {
+        $p->prepare("INSERT INTO form_submissions (enrolment_id,module_id,data,updated_at) VALUES (?,?,?,?)")
+          ->execute([$enrolmentId,$moduleId,$json,$now]);
+    }
+}
+
+/** All submissions for a module, with student names (staff view). */
+function lms_module_submissions(PDO $p, int $moduleId): array {
+    $st = $p->prepare("
+        SELECT fs.*, s.first_name, s.last_name, s.email
+        FROM form_submissions fs
+        JOIN enrolments e ON e.id=fs.enrolment_id
+        JOIN students s ON s.id=e.student_id
+        WHERE fs.module_id=? ORDER BY fs.updated_at DESC");
+    $st->execute([$moduleId]);
+    return $st->fetchAll();
 }
 
 /** Seed a demo SCORM package + a demo quiz once, so the LMS is testable out of the box. */

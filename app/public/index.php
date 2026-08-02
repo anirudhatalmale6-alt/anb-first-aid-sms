@@ -137,7 +137,7 @@ if (in_array($r, ['my','mycert'], true)) {
 }
 
 /* ============ LMS player: online modules (SCORM + quiz) — learner or admin preview ============ */
-if (in_array($r, ['learn','scorm_track','quiz_submit'], true)) {
+if (in_array($r, ['learn','scorm_track','quiz_submit','form_submit'], true)) {
     require __DIR__ . '/../lib/lms.php';
     $pdo = db();
     lms_ensure_schema($pdo); lms_seed_demo($pdo);
@@ -179,9 +179,23 @@ if (in_array($r, ['learn','scorm_track','quiz_submit'], true)) {
         exit;
     }
 
+    if ($r === 'form_submit') {
+        $data = $_POST['f'] ?? [];
+        if ($enrolment) {
+            lms_save_form_submission($pdo, (int)$enrolment['id'], $moduleId, $data);
+            lms_record_progress($pdo, (int)$enrolment['id'], $moduleId, 'completed', null);
+        }
+        $submission = $enrolment ? lms_form_submission($pdo, (int)$enrolment['id'], $moduleId) : ['fields'=>$data];
+        render('learn', ['module'=>$module,'enrolment'=>$enrolment,'questions'=>[],
+                         'submission'=>$submission,'justSaved'=>true], $module['title']);
+        exit;
+    }
+
     // r === 'learn'
     $questions = $module['type']==='quiz' ? lms_questions($pdo, $moduleId) : [];
-    render('learn', compact('module','enrolment','questions'), $module['title']);
+    $submission = ($module['type']==='incident_report' && $enrolment)
+        ? lms_form_submission($pdo, (int)$enrolment['id'], $moduleId) : null;
+    render('learn', compact('module','enrolment','questions','submission'), $module['title']);
     exit;
 }
 
@@ -379,6 +393,62 @@ case 'courses':
     render('courses', compact('rows'), 'Courses');
     break;
 
+case 'locations':
+    $editId = (int)($_GET['edit'] ?? 0);
+    $edit = $editId ? $pdo->query("SELECT * FROM locations WHERE id=".$editId)->fetch() : null;
+    $rows = $pdo->query("
+        SELECT l.*, (SELECT COUNT(*) FROM schedules s WHERE s.location_id=l.id) uses
+        FROM locations l ORDER BY l.active DESC, l.name")->fetchAll();
+    render('locations', compact('rows','edit'), 'Locations');
+    break;
+
+case 'location_save':
+    $id   = (int)($_POST['id'] ?? 0);
+    $name = trim($_POST['name'] ?? '');
+    $ident= trim($_POST['identifier'] ?? '');
+    $sub  = trim($_POST['suburb'] ?? '');
+    $st8  = trim($_POST['state'] ?? '');
+    $pc   = trim($_POST['postcode'] ?? '');
+    $act  = isset($_POST['active']) ? 1 : 0;
+    if ($name === '') {
+        $_SESSION['flash'] = 'Please enter a location name.';
+    } elseif ($id) {
+        $pdo->prepare("UPDATE locations SET name=?,identifier=?,suburb=?,state=?,postcode=?,active=? WHERE id=?")
+            ->execute([$name,$ident,$sub,$st8,$pc,$act,$id]);
+        $_SESSION['flash'] = 'Location updated.';
+    } else {
+        $pdo->prepare("INSERT INTO locations (name,identifier,suburb,state,postcode,active) VALUES (?,?,?,?,?,1)")
+            ->execute([$name,$ident,$sub,$st8,$pc]);
+        $_SESSION['flash'] = 'Location added.';
+    }
+    redirect('?r=locations');
+    break;
+
+case 'location_delete':
+    $pdo->prepare("UPDATE locations SET active=0 WHERE id=?")->execute([(int)($_GET['id'] ?? 0)]);
+    $_SESSION['flash'] = 'Location deactivated.';
+    redirect('?r=locations');
+    break;
+
+case 'form_subs':   // staff: list submissions for an incident-report module
+    require __DIR__ . '/../lib/lms.php'; lms_ensure_schema($pdo);
+    $module = lms_module($pdo, (int)($_GET['module_id'] ?? 0));
+    if (!$module) redirect('?r=content');
+    $subs = lms_module_submissions($pdo, (int)$module['id']);
+    render('form_subs', compact('module','subs'), 'Submissions');
+    break;
+
+case 'form_view':   // staff: view one student's submission (read-only)
+    require __DIR__ . '/../lib/lms.php'; lms_ensure_schema($pdo);
+    $sub = $pdo->query("SELECT * FROM form_submissions WHERE id=".(int)($_GET['sub'] ?? 0))->fetch();
+    if (!$sub) redirect('?r=content');
+    $sub['fields'] = (array)json_decode($sub['data'] ?? '{}', true);
+    $module = lms_module($pdo, (int)$sub['module_id']);
+    $viewStudent = $pdo->query("SELECT s.* FROM enrolments e JOIN students s ON s.id=e.student_id WHERE e.id=".(int)$sub['enrolment_id'])->fetch() ?: null;
+    render('learn', ['module'=>$module,'enrolment'=>null,'questions'=>[],
+                     'submission'=>$sub,'readonly'=>true,'viewStudent'=>$viewStudent], $module['title']);
+    break;
+
 case 'certificates':
     $rows = $pdo->query("
         SELECT c.*, s.first_name, s.last_name, co.title course_title, co.code course_code
@@ -520,14 +590,22 @@ case 'content_upload':
     redirect('?r=content');
     break;
 
-case 'module_new':   // create an empty quiz module then open the builder
+case 'module_new':   // create a quiz (then open builder) or an incident-report form module
     require __DIR__ . '/../lib/lms.php';
     lms_ensure_schema($pdo);
     $courseId = (int)($_POST['course_id'] ?? 0);
-    $title    = trim($_POST['title'] ?? '') ?: 'Knowledge Check';
+    $type     = ($_POST['type'] ?? 'quiz') === 'incident_report' ? 'incident_report' : 'quiz';
+    $title    = trim($_POST['title'] ?? '') ?: ($type==='incident_report' ? 'Incident Report' : 'Knowledge Check');
     $pass     = (int)($_POST['pass_mark'] ?? 80);
+    $body     = trim($_POST['body'] ?? '');
     if ($courseId) {
         $pos = (int)$pdo->query("SELECT COALESCE(MAX(position),0)+1 FROM course_modules")->fetchColumn();
+        if ($type === 'incident_report') {
+            $pdo->prepare("INSERT INTO course_modules (course_id,title,type,body,position) VALUES (?,?,'incident_report',?,?)")
+                ->execute([$courseId,$title,$body,$pos]);
+            $_SESSION['flash'] = 'Incident report assessment created.';
+            redirect('?r=content');
+        }
         $pdo->prepare("INSERT INTO course_modules (course_id,title,type,pass_mark,position) VALUES (?,?,'quiz',?,?)")
             ->execute([$courseId,$title,$pass,$pos]);
         redirect('?r=quiz_edit&id='.$pdo->lastInsertId());

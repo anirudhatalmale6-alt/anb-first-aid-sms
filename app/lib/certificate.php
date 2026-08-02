@@ -183,14 +183,9 @@ function anb_render_soa(string $out, string $qrFile, array $d): void {
     $pdf->SetFont('Arial','',11); $sig($pdf,$grey);
     $pdf->SetXY(0,$y+7); $pdf->Cell($W,6,'Date of Issue: '.date('jS F Y', strtotime($d['issue'])),0,1,'C');
 
-    // ---- Nationally Recognised Training mark (drawn) ----
-    $nrtX = 30; $nrtY = 224;
-    $pdf->SetFillColor(0,132,80);   $pdf->Rect($nrtX,$nrtY,4,9,'F');
-    $pdf->SetFillColor(220,40,40);  $pdf->Rect($nrtX+5,$nrtY,4,9,'F');
-    $pdf->SetFillColor(60,60,60);   $pdf->Rect($nrtX+10,$nrtY,4,9,'F');
-    $sig($pdf,[60,60,60]); $pdf->SetFont('Arial','B',8);
-    $pdf->SetXY($nrtX,$nrtY+10); $pdf->Cell(60,4,'NATIONALLY RECOGNISED',0,2,'L');
-    $pdf->Cell(60,4,'TRAINING',0,0,'L');
+    // ---- Nationally Recognised Training logo ----
+    if (is_file("$assets/nrt_logo.png"))
+        $pdf->Image("$assets/nrt_logo.png", 30, 222, 30, 0, 'PNG');
 
     // ---- signatory ----
     if (!empty($d['signature']) && is_file($d['signature']))
