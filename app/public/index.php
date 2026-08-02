@@ -573,6 +573,7 @@ case 'management_delete':
     break;
 
 case 'certificates':
+    require_once __DIR__ . '/../lib/certificate.php'; anb_ensure_reference_data($pdo);
     $rows = $pdo->query("
         SELECT c.*, s.first_name, s.last_name, co.title course_title, co.code course_code
         FROM certificates c JOIN students s ON s.id=c.student_id

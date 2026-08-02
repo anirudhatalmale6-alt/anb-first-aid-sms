@@ -56,7 +56,35 @@ function anb_next_cert_number(PDO $pdo, string $type = 'statement_of_attainment'
  * Generate a Statement of Attainment for an enrolment.
  * Creates the certificate record + PDF file. Returns the certificate row.
  */
+/**
+ * Reference data: course validity (months) + course -> units mapping.
+ * CPR = 1 unit, First Aid = 3 units, Child Care = 4 units, BELS = 1 unit (3yr).
+ * Idempotent - safe to call before every certificate.
+ */
+function anb_ensure_reference_data(PDO $pdo): void {
+    $pdo->exec("CREATE TABLE IF NOT EXISTS course_units (course_id INTEGER NOT NULL, unit_id INTEGER NOT NULL, position INTEGER DEFAULT 0, UNIQUE(course_id,unit_id))");
+    foreach (['HLTAID009'=>12,'HLTAID010'=>36,'HLTAID011'=>36,'HLTAID012'=>36] as $code=>$m)
+        $pdo->prepare("UPDATE courses SET validity_months=? WHERE code=?")->execute([$m,$code]);
+    if ((int)$pdo->query("SELECT COUNT(*) FROM course_units")->fetchColumn() === 0) {
+        $cid=[]; foreach ($pdo->query("SELECT id,code FROM courses") as $r) $cid[$r['code']]=$r['id'];
+        $uid=[]; foreach ($pdo->query("SELECT id,code FROM units") as $r) $uid[$r['code']]=$r['id'];
+        $titles=['HLTAID009'=>'Provide cardiopulmonary resuscitation','HLTAID010'=>'Provide basic emergency life support',
+                 'HLTAID011'=>'Provide first aid','HLTAID012'=>'Provide first aid in an education and care setting'];
+        foreach ($titles as $uc=>$ut)
+            if (!isset($uid[$uc])) { $pdo->prepare("INSERT INTO units (code,title) VALUES (?,?)")->execute([$uc,$ut]); $uid[$uc]=(int)$pdo->lastInsertId(); }
+        $map=[
+          'HLTAID009'=>['HLTAID009'],
+          'HLTAID010'=>['HLTAID010'],
+          'HLTAID011'=>['HLTAID009','HLTAID010','HLTAID011'],
+          'HLTAID012'=>['HLTAID009','HLTAID010','HLTAID011','HLTAID012'],
+        ];
+        $ins=$pdo->prepare("INSERT OR IGNORE INTO course_units (course_id,unit_id,position) VALUES (?,?,?)");
+        foreach ($map as $cc=>$ucs) { if(!isset($cid[$cc])) continue; $p=0; foreach($ucs as $u) if(isset($uid[$u])) $ins->execute([$cid[$cc],$uid[$u],++$p]); }
+    }
+}
+
 function anb_generate_certificate(PDO $pdo, int $enrolmentId): array {
+    anb_ensure_reference_data($pdo);
     // load enrolment context
     $st = $pdo->prepare("
         SELECT e.*, s.first_name, s.middle_name, s.last_name, s.salutation, s.email,
@@ -66,6 +94,16 @@ function anb_generate_certificate(PDO $pdo, int $enrolmentId): array {
     $st->execute([$enrolmentId]);
     $e = $st->fetch();
     if (!$e) throw new RuntimeException('Enrolment not found');
+
+    // ensure this enrolment has ALL its units from the course -> units mapping (add any missing)
+    $exq = $pdo->prepare("SELECT unit_id FROM enrolment_units WHERE enrolment_id=?"); $exq->execute([$enrolmentId]);
+    $have = array_map('intval', $exq->fetchAll(PDO::FETCH_COLUMN));
+    $cu = $pdo->prepare("SELECT unit_id FROM course_units WHERE course_id=? ORDER BY position"); $cu->execute([(int)$e['course_id']]);
+    $mapped = array_map('intval', $cu->fetchAll(PDO::FETCH_COLUMN));
+    if ($mapped) {
+        $insU = $pdo->prepare("INSERT INTO enrolment_units (enrolment_id,unit_id,outcome_national,date_achieved) VALUES (?,?, '70', NULL)");
+        foreach ($mapped as $u) if (!in_array($u, $have, true)) $insU->execute([$enrolmentId, $u]);
+    }
 
     // Signing off / issuing a certificate means the trainer has confirmed the
     // student is competent - mark any still-open units as Competency achieved (20).
@@ -95,9 +133,11 @@ function anb_generate_certificate(PDO $pdo, int $enrolmentId): array {
     $pdf_path = $dir . '/' . $number . '.pdf';
     $qr_path  = $dir . '/' . $number . '.png';
     anb_qr_png(ANB_VERIFY_BASE . '/?r=verify&cert=' . $number, $qr_path);
+    $sigFile = __DIR__ . '/../assets/signature.png';
     anb_render_soa($pdf_path, $qr_path, [
         'name'=>$name, 'number'=>$number, 'issue'=>$issue, 'expiry'=>$expiry,
         'student_no'=>$e['student_id'], 'units'=>$units,
+        'signature'=> is_file($sigFile) ? $sigFile : null,
     ]);
     @unlink($qr_path);
 
@@ -189,7 +229,7 @@ function anb_render_soa(string $out, string $qrFile, array $d): void {
 
     // ---- signatory ----
     if (!empty($d['signature']) && is_file($d['signature']))
-        $pdf->Image($d['signature'], 120, 218, 45, 0, 'PNG');
+        $pdf->Image($d['signature'], 121, 210, 42, 0, 'PNG');
     $pdf->SetDrawColor(120,120,120); $pdf->SetLineWidth(0.3); $pdf->Line(118,233,178,233);
     $sig($pdf,$purple); $pdf->SetFont('Arial','B',12);
     $pdf->SetXY(118,234); $pdf->Cell(60,5,'Gloria Omoregie',0,2,'L');
