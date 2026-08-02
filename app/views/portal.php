@@ -68,7 +68,7 @@
               $done = $status==='completed'; ?>
               <div class="d-flex justify-content-between align-items-center py-1">
                 <div class="small">
-                  <i class="bi <?= $m['type']==='quiz'?'bi-ui-checks-grid':($m['type']==='incident_report'?'bi-clipboard2-pulse':'bi-play-btn') ?> text-muted"></i>
+                  <i class="bi <?= $m['type']==='quiz'?'bi-ui-checks-grid':($m['type']==='incident_report'?'bi-clipboard2-pulse':($m['type']==='practical'?'bi-clipboard2-check':'bi-play-btn')) ?> text-muted"></i>
                   <?= e($m['title']) ?>
                   <?php if ($done): ?><span class="badge text-bg-success ms-1">Completed<?= $m['progress']['score']!==null?' · '.(int)$m['progress']['score'].'%':'' ?></span>
                   <?php elseif ($status==='in_progress'): ?><span class="badge text-bg-warning ms-1">In progress</span><?php endif; ?>

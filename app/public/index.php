@@ -449,6 +449,48 @@ case 'form_view':   // staff: view one student's submission (read-only)
                      'submission'=>$sub,'readonly'=>true,'viewStudent'=>$viewStudent], $module['title']);
     break;
 
+case 'obs_list':   // trainer: learners to observe for a practical module
+    require __DIR__ . '/../lib/lms.php'; lms_ensure_schema($pdo);
+    $module = lms_module($pdo, (int)($_GET['module_id'] ?? 0));
+    if (!$module) redirect('?r=content');
+    $learners = lms_course_learners($pdo, (int)$module['course_id']);
+    foreach ($learners as &$L) {
+        $ob = lms_observation($pdo, (int)$L['enrolment_id'], (int)$module['id']);
+        $L['overall'] = $ob['overall'] ?? null;
+        $ackq = $pdo->prepare("SELECT status FROM learner_progress WHERE enrolment_id=? AND module_id=?");
+        $ackq->execute([(int)$L['enrolment_id'], (int)$module['id']]);
+        $L['ack'] = ($ackq->fetchColumn() === 'completed');
+    }
+    unset($L);
+    render('obs_list', compact('module','learners'), 'Observations');
+    break;
+
+case 'obs_mark':   // trainer: mark the observation checklist for one learner
+    require __DIR__ . '/../lib/lms.php'; lms_ensure_schema($pdo);
+    $module  = lms_module($pdo, (int)($_GET['module_id'] ?? 0));
+    $enrolId = (int)($_GET['enrol'] ?? 0);
+    if (!$module || !$enrolId) redirect('?r=content');
+    $skills  = (array)json_decode($module['skills'] ?? '[]', true);
+    $ob      = lms_observation($pdo, $enrolId, (int)$module['id']);
+    $learner = $pdo->query("SELECT s.* FROM enrolments e JOIN students s ON s.id=e.student_id WHERE e.id=".$enrolId)->fetch() ?: null;
+    render('obs_mark', compact('module','skills','ob','learner','enrolId'), 'Observation');
+    break;
+
+case 'obs_save':
+    require __DIR__ . '/../lib/lms.php'; lms_ensure_schema($pdo);
+    $moduleId = (int)($_POST['module_id'] ?? 0);
+    $enrolId  = (int)($_POST['enrol'] ?? 0);
+    $results  = $_POST['r'] ?? [];
+    $overall  = ($_POST['overall'] ?? '') === 'satisfactory' ? 'satisfactory' : 'not_yet';
+    $assessor = trim($_POST['assessor'] ?? '');
+    $comments = trim($_POST['comments'] ?? '');
+    if ($moduleId && $enrolId) {
+        lms_save_observation($pdo, $enrolId, $moduleId, $results, $overall, $assessor, $comments);
+        $_SESSION['flash'] = 'Observation saved.';
+    }
+    redirect('?r=obs_list&module_id='.$moduleId);
+    break;
+
 case 'certificates':
     $rows = $pdo->query("
         SELECT c.*, s.first_name, s.last_name, co.title course_title, co.code course_code
@@ -594,12 +636,20 @@ case 'module_new':   // create a quiz (then open builder) or an incident-report 
     require __DIR__ . '/../lib/lms.php';
     lms_ensure_schema($pdo);
     $courseId = (int)($_POST['course_id'] ?? 0);
-    $type     = ($_POST['type'] ?? 'quiz') === 'incident_report' ? 'incident_report' : 'quiz';
-    $title    = trim($_POST['title'] ?? '') ?: ($type==='incident_report' ? 'Incident Report' : 'Knowledge Check');
+    $type     = in_array($_POST['type'] ?? 'quiz', ['quiz','incident_report','practical'], true) ? $_POST['type'] : 'quiz';
+    $title    = trim($_POST['title'] ?? '') ?: (['incident_report'=>'Incident Report','practical'=>'Practical Assessment'][$type] ?? 'Knowledge Check');
     $pass     = (int)($_POST['pass_mark'] ?? 80);
     $body     = trim($_POST['body'] ?? '');
     if ($courseId) {
         $pos = (int)$pdo->query("SELECT COALESCE(MAX(position),0)+1 FROM course_modules")->fetchColumn();
+        if ($type === 'practical') {
+            $skills = array_values(array_filter(array_map('trim', preg_split('/\r?\n/', $_POST['skills'] ?? ''))));
+            $ack    = trim($_POST['ack_text'] ?? '');
+            $pdo->prepare("INSERT INTO course_modules (course_id,title,type,body,skills,ack_text,position) VALUES (?,?,'practical',?,?,?,?)")
+                ->execute([$courseId,$title,$body,json_encode($skills),$ack,$pos]);
+            $_SESSION['flash'] = 'Practical assessment activity created.';
+            redirect('?r=content');
+        }
         if ($type === 'incident_report') {
             $pdo->prepare("INSERT INTO course_modules (course_id,title,type,body,position) VALUES (?,?,'incident_report',?,?)")
                 ->execute([$courseId,$title,$body,$pos]);

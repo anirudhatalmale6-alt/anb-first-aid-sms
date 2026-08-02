@@ -58,8 +58,57 @@ function lms_ensure_schema(PDO $p): void {
         UNIQUE(enrolment_id, module_id)
     );
     ");
-    // course_modules.body holds scenario/instructions for incident_report modules
+    // course_modules.body holds scenario/instructions for incident_report + practical modules
     try { $p->exec("ALTER TABLE course_modules ADD COLUMN body TEXT"); } catch (Throwable $e) {}
+    try { $p->exec("ALTER TABLE course_modules ADD COLUMN skills TEXT"); } catch (Throwable $e) {}   // JSON array of practical skills
+    try { $p->exec("ALTER TABLE course_modules ADD COLUMN ack_text TEXT"); } catch (Throwable $e) {} // learner acknowledgement statement
+    $p->exec("
+    CREATE TABLE IF NOT EXISTS observations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        enrolment_id INTEGER NOT NULL,
+        module_id INTEGER NOT NULL,
+        results TEXT,                          -- JSON { skillIndex: 'S' | 'NYS' }
+        overall TEXT,                          -- 'satisfactory' | 'not_yet'
+        assessor TEXT,
+        comments TEXT,
+        updated_at TEXT,
+        UNIQUE(enrolment_id, module_id)
+    );
+    ");
+}
+
+/** Students enrolled in a course (for trainer observation lists). */
+function lms_course_learners(PDO $p, int $courseId): array {
+    $st = $p->prepare("
+        SELECT e.id enrolment_id, s.first_name, s.last_name, s.email
+        FROM enrolments e JOIN students s ON s.id=e.student_id
+        WHERE e.course_id=? ORDER BY s.last_name, s.first_name");
+    $st->execute([$courseId]);
+    return $st->fetchAll();
+}
+
+/** One learner's observation record (with decoded results) or null. */
+function lms_observation(PDO $p, int $enrolmentId, int $moduleId): ?array {
+    $st = $p->prepare("SELECT * FROM observations WHERE enrolment_id=? AND module_id=?");
+    $st->execute([$enrolmentId, $moduleId]);
+    $row = $st->fetch();
+    if (!$row) return null;
+    $row['results_arr'] = (array)json_decode($row['results'] ?? '{}', true);
+    return $row;
+}
+
+/** Save/replace a trainer observation. */
+function lms_save_observation(PDO $p, int $enrolmentId, int $moduleId, array $results, string $overall, string $assessor, string $comments): void {
+    $json = json_encode($results); $now = date('Y-m-d H:i:s');
+    $ex = $p->prepare("SELECT id FROM observations WHERE enrolment_id=? AND module_id=?");
+    $ex->execute([$enrolmentId, $moduleId]);
+    if ($id = $ex->fetchColumn()) {
+        $p->prepare("UPDATE observations SET results=?,overall=?,assessor=?,comments=?,updated_at=? WHERE id=?")
+          ->execute([$json,$overall,$assessor,$comments,$now,(int)$id]);
+    } else {
+        $p->prepare("INSERT INTO observations (enrolment_id,module_id,results,overall,assessor,comments,updated_at) VALUES (?,?,?,?,?,?,?)")
+          ->execute([$enrolmentId,$moduleId,$json,$overall,$assessor,$comments,$now]);
+    }
 }
 
 /** Get a learner's saved form submission (assoc) or null. */

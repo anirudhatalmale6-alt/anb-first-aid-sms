@@ -57,12 +57,14 @@
       <tr>
         <td class="small fw-semibold"><?= e($m['course_code']) ?></td>
         <td class="small"><?= e($m['title']) ?></td>
-        <?php $tlabel=['quiz'=>'QUIZ','scorm'=>'SCORM','incident_report'=>'FORM'][$m['type']]??strtoupper($m['type']);
-              $tcolor=['quiz'=>'text-bg-primary','scorm'=>'text-bg-danger','incident_report'=>'text-bg-success'][$m['type']]??'text-bg-secondary'; ?>
+        <?php $tlabel=['quiz'=>'QUIZ','scorm'=>'SCORM','incident_report'=>'FORM','practical'=>'PRACTICAL'][$m['type']]??strtoupper($m['type']);
+              $tcolor=['quiz'=>'text-bg-primary','scorm'=>'text-bg-danger','incident_report'=>'text-bg-success','practical'=>'text-bg-warning'][$m['type']]??'text-bg-secondary';
+              $skillCount=$m['type']==='practical'?count((array)json_decode($m['skills']??'[]',true)):0; ?>
         <td><span class="badge <?= $tcolor ?>"><?= $tlabel ?></span></td>
         <td class="text-center small">
           <?php if ($m['type']==='quiz'): ?><?= (int)$m['question_count'] ?> question<?= $m['question_count']==1?'':'s' ?>
           <?php elseif ($m['type']==='incident_report'): ?><span class="text-muted">Incident report form</span>
+          <?php elseif ($m['type']==='practical'): ?><span class="text-muted"><?= $skillCount ?> skill<?= $skillCount==1?'':'s' ?></span>
           <?php else: ?><span class="text-muted"><?= e($m['launch_url']) ?></span><?php endif; ?>
         </td>
         <td class="text-end">
@@ -71,6 +73,8 @@
             <a class="btn btn-sm btn-outline-primary" href="?r=quiz_edit&id=<?= (int)$m['id'] ?>"><i class="bi bi-pencil"></i> Edit</a>
           <?php elseif ($m['type']==='incident_report'): ?>
             <a class="btn btn-sm btn-outline-primary" href="?r=form_subs&module_id=<?= (int)$m['id'] ?>"><i class="bi bi-inbox"></i> Submissions</a>
+          <?php elseif ($m['type']==='practical'): ?>
+            <a class="btn btn-sm btn-outline-primary" href="?r=obs_list&module_id=<?= (int)$m['id'] ?>"><i class="bi bi-clipboard2-check"></i> Observations</a>
           <?php endif; ?>
           <a class="btn btn-sm btn-outline-danger" href="?r=module_delete&id=<?= (int)$m['id'] ?>" onclick="return confirm('Remove this module?')"><i class="bi bi-trash"></i></a>
         </td>

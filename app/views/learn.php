@@ -102,6 +102,35 @@ $isPreview = empty($enrolment);
       <?php endif; ?>
     </form>
 
+  <?php elseif ($module['type'] === 'practical'):
+      $already = !empty($submission) && !empty($submission['id']);
+  ?>
+    <?php if (!empty($justSaved) || $already): ?>
+      <div class="alert alert-success"><i class="bi bi-check-circle-fill"></i> Activity completed<?= $isPreview?' (preview - not saved)':'' ?>. You've acknowledged the practical assessment requirements. Please attend your scheduled face-to-face practical assessment.</div>
+    <?php endif; ?>
+    <div class="card p-3 mb-3">
+      <h5 class="fw-bold mb-1" style="color:#2F1D3A;"><?= e($module['title']) ?></h5>
+      <div class="small" style="white-space:pre-line;"><?= e($module['body']) ?></div>
+    </div>
+    <?php if (!$already && !$isPreview || $isPreview): ?>
+    <form method="post" action="?r=form_submit">
+      <input type="hidden" name="module_id" value="<?= (int)$module['id'] ?>">
+      <div class="card p-3 mb-4" style="border-left:4px solid #E53935;">
+        <h6 class="fw-bold mb-2" style="color:#2F1D3A;">Learner Acknowledgement</h6>
+        <?php if (!empty($module['ack_text'])): ?><p class="small"><?= e($module['ack_text']) ?></p><?php endif; ?>
+        <div class="form-check mb-3">
+          <input class="form-check-input" type="checkbox" name="f[acknowledged]" value="1" id="ack" required <?= $isPreview?'':'' ?>>
+          <label class="form-check-label small fw-semibold" for="ack">I have read, understood and acknowledge the above.</label>
+        </div>
+        <label class="form-label small fw-semibold">Type your full name to sign</label>
+        <input name="f[signature]" class="form-control form-control-sm mb-3" style="max-width:340px;" value="<?= e($submission['fields']['signature'] ?? '') ?>" required>
+        <button class="btn btn-anb"><i class="bi bi-check2-circle"></i> Complete Activity</button>
+      </div>
+    </form>
+    <?php else: ?>
+      <div class="text-center mb-4"><a href="<?= e($backUrl) ?>" class="btn btn-anb"><i class="bi bi-arrow-left"></i> Back to my learning</a></div>
+    <?php endif; ?>
+
   <?php elseif ($module['type'] === 'scorm'):
       $src = '/'.lms_scorm_url_prefix().'/'.trim($module['scorm_dir'],'/').'/'.ltrim($module['launch_url'],'/');
   ?>
