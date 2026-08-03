@@ -531,6 +531,69 @@ case 'email_delete':
     redirect('?r=emails');
     break;
 
+case 'email_settings':
+    require_once __DIR__ . '/../lib/mailer.php';
+    $settings = anb_settings($pdo);
+    render('email_settings', compact('settings'), 'Email Settings');
+    break;
+
+case 'email_settings_save':
+    require_once __DIR__ . '/../lib/mailer.php';
+    foreach (['smtp_host','smtp_port','smtp_security','smtp_user','mail_from','mail_from_name'] as $k)
+        anb_setting_save($pdo, $k, trim($_POST[$k] ?? ''));
+    // only overwrite the password if a new one was typed (blank = keep existing)
+    if (($_POST['smtp_pass'] ?? '') !== '') anb_setting_save($pdo, 'smtp_pass', (string)$_POST['smtp_pass']);
+    $_SESSION['flash'] = 'Email settings saved.';
+    redirect('?r=email_settings');
+    break;
+
+case 'email_test':
+    require_once __DIR__ . '/../lib/mailer.php';
+    $to = trim($_POST['to'] ?? '');
+    if ($to === '') { $_SESSION['flash'] = 'Enter a recipient address for the test.'; redirect('?r=email_settings'); }
+    [$ok,$err] = anb_send_mail($pdo, $to,
+        'Test email from A&B First Aid Training',
+        '<p>This is a test email from your A&amp;B First Aid Training system.</p>'
+        .'<p>If you can read this, SMTP sending is working correctly.</p>');
+    $_SESSION['flash'] = $ok ? "Test email sent to $to." : "Test failed: $err";
+    redirect('?r=email_settings');
+    break;
+
+case 'cert_email':
+    require_once __DIR__ . '/../lib/mailer.php';
+    require_once __DIR__ . '/../lib/certificate.php';
+    $cid = (int)($_GET['id'] ?? 0);
+    $c = $pdo->prepare("SELECT c.*, s.first_name, s.last_name, s.email, co.title course_title, co.code course_code
+        FROM certificates c JOIN students s ON s.id=c.student_id
+        JOIN enrolments e ON e.id=c.enrolment_id JOIN courses co ON co.id=e.course_id WHERE c.id=?");
+    $c->execute([$cid]); $cert = $c->fetch();
+    if (!$cert) { http_response_code(404); echo 'Certificate not found'; break; }
+    if (empty($cert['email'])) { $_SESSION['flash'] = 'That student has no email address on file.'; redirect('?r=certificates'); }
+    // ensure the PDF exists (lazy-render migrated certs)
+    $cert = anb_ensure_cert_pdf($pdo, $cert);
+    $pdfPath = __DIR__ . '/../data/' . $cert['file_path'];
+    // build the email from the "Certificate Issued" template (fallback to a default)
+    $tpl = $pdo->query("SELECT * FROM email_templates WHERE name='Certificate Issued' LIMIT 1")->fetch();
+    $vars = [
+        'first_name'=>$cert['first_name'], 'last_name'=>$cert['last_name'],
+        'course'=>$cert['course_code'].' - '.$cert['course_title'],
+        'certificate_number'=>$cert['certificate_number'],
+        'certificate_link'=>ANB_VERIFY_BASE.'/?r=cert&num='.urlencode($cert['certificate_number']),
+        'issue_date'=>date('d-m-Y', strtotime((string)$cert['issue_date'])),
+        'expiry_date'=>$cert['expiry_date'] ? date('d-m-Y', strtotime((string)$cert['expiry_date'])) : '',
+    ];
+    $subject = anb_merge($tpl['subject'] ?? 'Your certificate from A&B First Aid Training', $vars);
+    $bodyTxt = anb_merge($tpl['body'] ?? "Hi {first_name},\n\nYour certificate {certificate_number} is attached.\n\nA&B First Aid Training", $vars);
+    $bodyHtml = nl2br(e($bodyTxt));
+    [$ok,$err] = anb_send_mail($pdo, $cert['email'], $subject, $bodyHtml,
+        [['path'=>$pdfPath, 'name'=>$cert['certificate_number'].'.pdf']]);
+    if ($ok) {
+        $pdo->prepare("UPDATE certificates SET emailed_at=datetime('now') WHERE id=?")->execute([$cid]);
+        $_SESSION['flash'] = 'Certificate emailed to '.$cert['email'].'.';
+    } else $_SESSION['flash'] = 'Could not send: '.$err;
+    redirect('?r=certificates');
+    break;
+
 // ---------- Organisation Management (files) ----------
 case 'management':
     $pdo->exec("CREATE TABLE IF NOT EXISTS org_files (id INTEGER PRIMARY KEY AUTOINCREMENT, category TEXT, title TEXT, notes TEXT, file_path TEXT, original_name TEXT, uploaded_at TEXT)");

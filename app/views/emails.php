@@ -2,6 +2,7 @@
 <div class="topbar">
   <div><h4 class="mb-0 fw-bold" style="color:#2F1D3A;">Email Templates</h4>
     <div class="text-muted small">Reusable emails for certificates, surveys, reminders and enrolments</div></div>
+  <a href="?r=email_settings" class="btn btn-outline-secondary btn-sm"><i class="bi bi-gear"></i> Email settings</a>
 </div>
 <?php if ($flash): ?><div class="alert alert-info py-2"><?= e($flash) ?></div><?php endif; ?>
 

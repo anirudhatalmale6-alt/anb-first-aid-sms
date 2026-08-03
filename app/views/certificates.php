@@ -5,7 +5,7 @@
 <div class="card p-3">
   <div class="table-responsive">
   <table class="table align-middle">
-    <thead><tr><th>Number</th><th>Student</th><th>Course</th><th>Issued</th><th>Expires</th><th>Emailed</th></tr></thead>
+    <thead><tr><th>Number</th><th>Student</th><th>Course</th><th>Issued</th><th>Expires</th><th>Emailed</th><th></th></tr></thead>
     <tbody>
     <?php foreach ($rows as $c): $d = days_until($c['expiry_date']); ?>
       <tr>
@@ -18,7 +18,12 @@
         <td class="small"><?= $c['expiry_date'] ? date('d-m-Y', strtotime((string)$c['expiry_date'])) : '' ?>
           <?php if ($d !== null && $d < 0): ?><span class="badge text-bg-danger">Expired</span>
           <?php elseif ($d !== null && $d <= 60): ?><span class="badge text-bg-warning"><?= $d ?>d</span><?php endif; ?></td>
-        <td><?php if ($c['emailed_at']): ?><i class="bi bi-check-circle-fill text-success"></i><?php else: ?><span class="text-muted small">—</span><?php endif; ?></td>
+        <td><?php if ($c['emailed_at']): ?><i class="bi bi-check-circle-fill text-success" title="Emailed <?= e($c['emailed_at']) ?>"></i><?php else: ?><span class="text-muted small">—</span><?php endif; ?></td>
+        <td class="text-end">
+          <a href="?r=cert_email&id=<?= (int)$c['id'] ?>" class="btn btn-sm btn-outline-danger py-0"
+             onclick="return confirm('Email this certificate to the student?')" title="Email certificate to student">
+            <i class="bi bi-envelope-arrow-up"></i></a>
+        </td>
       </tr>
     <?php endforeach; ?>
     </tbody>
