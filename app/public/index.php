@@ -361,6 +361,10 @@ case 'cert':
     $num = trim($_GET['num'] ?? '');
     $c = $pdo->prepare("SELECT * FROM certificates WHERE certificate_number=?");
     $c->execute([$num]); $cert = $c->fetch();
+    if ($cert && (empty($cert['file_path']) || !is_file(__DIR__ . '/../data/' . $cert['file_path']))) {
+        require_once __DIR__ . '/../lib/certificate.php';
+        try { $cert = anb_ensure_cert_pdf($pdo, $cert); } catch (Throwable $ex) {}
+    }
     $file = $cert ? __DIR__ . '/../data/' . $cert['file_path'] : '';
     if ($cert && is_file($file)) {
         header('Content-Type: application/pdf');

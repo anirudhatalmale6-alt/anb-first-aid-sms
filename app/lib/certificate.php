@@ -85,6 +85,12 @@ function anb_ensure_reference_data(PDO $pdo): void {
 
 function anb_generate_certificate(PDO $pdo, int $enrolmentId): array {
     anb_ensure_reference_data($pdo);
+    // Idempotent: if this enrolment already has a certificate (e.g. migrated
+    // historical record), reuse it - regenerate the PDF file if it is missing,
+    // preserving the ORIGINAL issue/expiry/number. No duplicate is created.
+    $ex = $pdo->prepare("SELECT * FROM certificates WHERE enrolment_id=? ORDER BY id LIMIT 1");
+    $ex->execute([$enrolmentId]);
+    if ($existing = $ex->fetch()) { anb_ensure_cert_pdf($pdo, $existing); return $existing; }
     // load enrolment context
     $st = $pdo->prepare("
         SELECT e.*, s.first_name, s.middle_name, s.last_name, s.salutation, s.email,
@@ -251,4 +257,62 @@ function anb_render_soa(string $out, string $qrFile, array $d): void {
         "Verify at ".str_replace('https://','',ANB_VERIFY_BASE), 0,'R');
 
     $pdf->Output('F', $out);
+}
+
+/**
+ * Ensure the PDF file for an EXISTING certificate row exists on disk.
+ * Used for migrated historical certificates (stored with dates + number but no
+ * PDF yet) - renders the SoA on demand using the PRESERVED issue/expiry/number.
+ * Returns the (possibly updated) certificate row.
+ */
+function anb_ensure_cert_pdf(PDO $pdo, array $cert): array {
+    $dir  = __DIR__ . '/../data/certs';
+    $path = $dir . '/' . $cert['certificate_number'] . '.pdf';
+    if (!empty($cert['file_path']) && is_file(__DIR__ . '/../data/' . $cert['file_path']))
+        return $cert; // already rendered
+    if (!is_dir($dir)) mkdir($dir, 0775, true);
+
+    // student + course context
+    $st = $pdo->prepare("
+        SELECT e.id AS enrolment_id, e.student_id, s.first_name, s.middle_name, s.last_name,
+               co.validity_months
+        FROM enrolments e JOIN students s ON s.id=e.student_id JOIN courses co ON co.id=e.course_id
+        WHERE e.id=?");
+    $st->execute([(int)$cert['enrolment_id']]);
+    $e = $st->fetch();
+    if (!$e) return $cert;
+
+    // competent units for the enrolment (fall back to the course->units mapping)
+    $u = $pdo->prepare("SELECT un.code, un.title, eu.date_achieved
+        FROM enrolment_units eu JOIN units un ON un.id=eu.unit_id
+        WHERE eu.enrolment_id=? AND eu.outcome_national='20' ORDER BY un.code");
+    $u->execute([(int)$cert['enrolment_id']]);
+    $units = $u->fetchAll();
+    if (!$units) {
+        $cu = $pdo->prepare("SELECT un.code, un.title FROM course_units cu
+            JOIN units un ON un.id=cu.unit_id
+            WHERE cu.course_id=(SELECT course_id FROM enrolments WHERE id=?) ORDER BY cu.position");
+        $cu->execute([(int)$cert['enrolment_id']]);
+        $units = $cu->fetchAll();
+        foreach ($units as &$_u) $_u['date_achieved'] = $cert['issue_date'];
+        unset($_u);
+    }
+
+    $qr = $dir . '/' . $cert['certificate_number'] . '.png';
+    anb_qr_png(ANB_VERIFY_BASE . '/?r=verify&cert=' . $cert['certificate_number'], $qr);
+    $sigFile = __DIR__ . '/../assets/signature.png';
+    anb_render_soa($path, $qr, [
+        'name'   => trim($e['first_name'].' '.$e['middle_name'].' '.$e['last_name']),
+        'number' => $cert['certificate_number'],
+        'issue'  => $cert['issue_date'],
+        'expiry' => $cert['expiry_date'],
+        'student_no' => $e['student_id'],
+        'units'  => $units,
+        'signature' => is_file($sigFile) ? $sigFile : null,
+    ]);
+    @unlink($qr);
+    $pdo->prepare("UPDATE certificates SET file_path=? WHERE id=?")
+        ->execute(['certs/'.$cert['certificate_number'].'.pdf', (int)$cert['id']]);
+    $cert['file_path'] = 'certs/'.$cert['certificate_number'].'.pdf';
+    return $cert;
 }
