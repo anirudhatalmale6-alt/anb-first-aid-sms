@@ -13,6 +13,15 @@ foreach ($rows as $r) {
         && $r['id_confirmed'] && $r['attendance_marked'] && $r['tasks_satisfactory'];
     if ($ok) $ready++;
 }
+// how many students still have no login email (only chased up for classes still to run)
+$classUpcoming = !empty($schedule['start_date']) && $schedule['start_date'] >= date('Y-m-d');
+$noLogin = 0; $loginFailed = 0;
+foreach ($rows as $r) {
+    if (empty($r['portal_emailed_at'])) { $noLogin++; if (!empty($r['portal_error'])) $loginFailed++; }
+}
+if (!$classUpcoming) $noLogin = 0;
+// Timestamps are stored by SQLite datetime('now'), which is UTC - show them in local time.
+$stamp = function ($t) { return $t ? date('j M, g:ia', strtotime($t . ' UTC')) : ''; };
 ?>
 <style>
   .pdot{ display:inline-block;width:15px;height:15px;border-radius:50%; }
@@ -34,9 +43,27 @@ foreach ($rows as $r) {
   </div>
 </div>
 
-<?php if (!empty($_SESSION['flash'])): ?>
-  <div class="alert alert-success"><i class="bi bi-check-circle-fill"></i> <?= e($_SESSION['flash']) ?></div>
+<?php if (!empty($_SESSION['flash'])):
+        $isErr = !empty($_SESSION['flash_error']); unset($_SESSION['flash_error']); ?>
+  <div class="alert alert-<?= $isErr ? 'danger' : 'success' ?>">
+    <i class="bi bi-<?= $isErr ? 'exclamation-triangle-fill' : 'check-circle-fill' ?>"></i> <?= e($_SESSION['flash']) ?></div>
   <?php unset($_SESSION['flash']); endif; ?>
+
+<?php if ($noLogin > 0): ?>
+  <div class="alert alert-warning d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div>
+      <i class="bi bi-envelope-exclamation-fill"></i>
+      <strong><?= (int)$noLogin ?> student<?= $noLogin===1?' has':'s have' ?> not received login details</strong>
+      for the online modules<?php if ($loginFailed): ?> — <?= (int)$loginFailed ?> of them because the email failed to send<?php endif; ?>.
+      They cannot start their pre-course learning until this is sent.
+    </div>
+    <form method="post" action="?r=class_send_access" class="m-0"
+          onsubmit="return confirm('Send login details to the <?= (int)$noLogin ?> student(s) who have not received them?');">
+      <input type="hidden" name="schedule_id" value="<?= (int)$schedule['id'] ?>">
+      <button type="submit" class="btn btn-sm btn-danger"><i class="bi bi-send"></i> Send now</button>
+    </form>
+  </div>
+<?php endif; ?>
 
 <div class="alert alert-light border small">
   <i class="bi bi-list-check text-danger"></i>
@@ -51,11 +78,12 @@ foreach ($rows as $r) {
       <tr>
         <th style="padding-left:18px;">Student</th>
         <th class="pipe-th">Status</th>
+        <th class="pipe-th">Login sent</th>
         <?php foreach ($cols as $c): ?><th class="pipe-th"><?= e($c) ?></th><?php endforeach; ?>
         <th class="pipe-th">Certificate</th>
       </tr>
       <tr class="table-light">
-        <td colspan="2"></td>
+        <td colspan="3"></td>
         <td class="pipe-td" colspan="4"></td>
         <td class="pipe-td"><button class="btn btn-sm btn-outline-secondary py-0">All Sighted</button></td>
         <td class="pipe-td"><button class="btn btn-sm btn-outline-secondary py-0">All Here</button></td>
@@ -71,12 +99,27 @@ foreach ($rows as $r) {
     ?>
       <tr>
         <td style="padding-left:18px;">
-          <div class="fw-semibold"><?= e($r['first_name'].' '.$r['last_name']) ?></div>
+          <a href="?r=student&id=<?= (int)$r['student_id'] ?>" class="fw-semibold text-decoration-none" style="color:#2F1D3A;" title="Open student details"><?= e($r['first_name'].' '.$r['last_name']) ?></a>
           <div class="text-muted small"><?= e($r['email']) ?></div>
         </td>
         <td class="pipe-td">
           <?php if ($allGreen): ?><span class="badge text-bg-success">Ready</span>
           <?php else: ?><span class="badge text-bg-warning">Pending</span><?php endif; ?>
+        </td>
+        <td class="pipe-td">
+          <?php if (!empty($r['portal_emailed_at'])): ?>
+            <span class="pdot bg-success" title="Login details emailed <?= e($stamp($r['portal_emailed_at'])) ?>"></span>
+            <div class="text-muted" style="font-size:.68rem;"><?= e($stamp($r['portal_emailed_at'])) ?></div>
+          <?php else: ?>
+            <span class="pdot bg-danger" title="<?= e($r['portal_error'] ? 'Last attempt failed: '.$r['portal_error'] : 'No login details sent yet') ?>"></span>
+            <div style="font-size:.68rem;">
+              <a href="?r=student_send_access&id=<?= (int)$r['student_id'] ?>&schedule_id=<?= (int)$schedule['id'] ?>"
+                 class="text-danger fw-semibold text-decoration-none">Send</a>
+            </div>
+            <?php if (!empty($r['portal_error'])): ?>
+              <div class="text-danger" style="font-size:.62rem;">failed</div>
+            <?php endif; ?>
+          <?php endif; ?>
         </td>
         <td class="pipe-td"><?= dot($r['online_complete']) ?></td>
         <td class="pipe-td"><?= dot($r['avetmiss_complete']) ?></td>
@@ -93,7 +136,7 @@ foreach ($rows as $r) {
           <?php else: ?><span class="text-muted small">—</span><?php endif; ?>
         </td>
       </tr>
-    <?php endforeach; if(!$rows): ?><tr><td colspan="10" class="text-muted p-3">No students enrolled in this class.</td></tr><?php endif; ?>
+    <?php endforeach; if(!$rows): ?><tr><td colspan="11" class="text-muted p-3">No students enrolled in this class.</td></tr><?php endif; ?>
     </tbody>
   </table>
   </div>
@@ -101,6 +144,16 @@ foreach ($rows as $r) {
     <div class="small text-muted">Only students with every box green can be certified.</div>
     <div>
       <button class="btn btn-outline-secondary"><i class="bi bi-arrow-repeat"></i> Refresh</button>
+      <form method="post" action="?r=class_send_access" class="d-inline" onsubmit="return confirm('Send portal login access to all students in this class who have not received it yet?');">
+        <input type="hidden" name="schedule_id" value="<?= (int)$schedule['id'] ?>">
+        <button type="submit" class="btn btn-outline-danger"><i class="bi bi-envelope-check"></i> Send access to class</button>
+      </form>
+      <form method="post" action="?r=class_send_access" class="d-inline"
+            onsubmit="return confirm('Resend login details to EVERY student in this class? Each one gets a brand new password and any earlier email stops working. Use this when students say the first email never arrived.');">
+        <input type="hidden" name="schedule_id" value="<?= (int)$schedule['id'] ?>">
+        <input type="hidden" name="mode" value="all">
+        <button type="submit" class="btn btn-outline-secondary" title="New password for everyone in this class"><i class="bi bi-arrow-repeat"></i> Resend to everyone</button>
+      </form>
       <a href="?r=signoff&schedule_id=<?= (int)$schedule['id'] ?>" class="btn btn-success"><i class="bi bi-check2-all"></i> Sign Off &amp; Generate Certificates (<?= $ready ?>)</a>
     </div>
   </div>
