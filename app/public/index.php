@@ -733,9 +733,11 @@ case 'pipeline':
         WHERE e.schedule_id=? ORDER BY s.last_name");
     $st->execute([$sid]); $rows = $st->fetchAll();
     // AVETMISS readiness is worked out from the record itself - see lib/avetmiss.php.
+    $avetTotal = count(avetmiss_required_fields());
     foreach ($rows as $i => $rw) {
         $miss = avetmiss_missing($rw);
         $rows[$i]['avetmiss_missing']  = $miss;
+        $rows[$i]['avetmiss_total']    = $avetTotal;   // lets the view tell "part done" from "nothing done"
         $rows[$i]['avetmiss_complete'] = $miss ? 0 : 1;
     }
     render('pipeline', compact('schedule','rows'), 'Class pipeline');

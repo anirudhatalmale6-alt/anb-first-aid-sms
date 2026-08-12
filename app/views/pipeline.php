@@ -123,14 +123,20 @@ $stamp = function ($t) { return $t ? date('j M, g:ia', strtotime($t . ' UTC')) :
         </td>
         <td class="pipe-td"><?= dot($r['online_complete']) ?></td>
         <td class="pipe-td">
-          <?php $am = $r['avetmiss_missing'] ?? []; ?>
+          <?php
+            $am    = $r['avetmiss_missing'] ?? [];
+            $amTot = $r['avetmiss_total'] ?? count($am);
+            // Amber when they have made a start and something is outstanding;
+            // red is reserved for a record with nothing on it at all.
+            $amPart = $am && count($am) < $amTot;
+          ?>
           <?php if (!$am): ?>
             <span class="pdot bg-success" title="All government reporting details are on file"></span>
           <?php else: ?>
             <a href="?r=student&id=<?= (int)$r['student_id'] ?>" class="text-decoration-none"
                title="Still needed: <?= e(implode(', ', $am)) ?>">
-              <span class="pdot bg-danger"></span>
-              <div class="text-danger" style="font-size:.62rem;"><?= count($am) ?> missing</div>
+              <span class="pdot <?= $amPart ? 'bg-warning' : 'bg-danger' ?>"></span>
+              <div class="<?= $amPart ? 'text-warning-emphasis' : 'text-danger' ?>" style="font-size:.62rem;"><?= count($am) ?> missing</div>
             </a>
           <?php endif; ?>
         </td>
