@@ -14,6 +14,8 @@
         <input type="hidden" name="id" value="<?= (int)($edit['id'] ?? 0) ?>">
         <label class="form-label small fw-semibold">Location name *</label>
         <input name="name" class="form-control mb-2" value="<?= e($edit['name'] ?? '') ?>" placeholder="e.g. St Marys Training Centre" required>
+        <label class="form-label small fw-semibold">Street address</label>
+        <input name="address" class="form-control mb-2" value="<?= e($edit['address'] ?? '') ?>" placeholder="e.g. 1 McFarlane St">
         <label class="form-label small fw-semibold">Identifier / code</label>
         <input name="identifier" class="form-control mb-2" value="<?= e($edit['identifier'] ?? '') ?>" placeholder="Optional short code">
         <label class="form-label small fw-semibold">Suburb</label>
@@ -45,7 +47,7 @@
           <tr class="<?= $l['active'] ? '' : 'text-muted' ?>">
             <td class="fw-semibold"><?= e($l['name']) ?>
               <?php if (!empty($l['identifier'])): ?><div class="text-muted small"><?= e($l['identifier']) ?></div><?php endif; ?></td>
-            <td class="small"><?= e(trim(($l['suburb'] ?? '').' '.($l['state'] ?? '').' '.($l['postcode'] ?? ''))) ?: '—' ?></td>
+            <td class="small"><?= e(trim(($l['address'] ?? '').' '.($l['suburb'] ?? '').' '.($l['state'] ?? '').' '.($l['postcode'] ?? ''), ' ,')) ?: '—' ?></td>
             <td class="text-center"><span class="badge text-bg-light border" title="Schedules using this location"><?= (int)$l['uses'] ?></span></td>
             <td class="text-center"><?php if ($l['active']): ?><span class="badge text-bg-success">Active</span><?php else: ?><span class="badge text-bg-secondary">Inactive</span><?php endif; ?></td>
             <td class="text-end" style="white-space:nowrap;">

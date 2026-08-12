@@ -58,6 +58,9 @@ function lms_ensure_schema(PDO $p): void {
         UNIQUE(enrolment_id, module_id)
     );
     ");
+    // learner_progress.wrong_qids: JSON list of question ids still answered wrong
+    // (so a re-attempt only re-tests what the learner got wrong, not the whole quiz).
+    try { $p->exec("ALTER TABLE learner_progress ADD COLUMN wrong_qids TEXT"); } catch (Throwable $e) {}
     // course_modules.body holds scenario/instructions for incident_report + practical modules
     try { $p->exec("ALTER TABLE course_modules ADD COLUMN body TEXT"); } catch (Throwable $e) {}
     try { $p->exec("ALTER TABLE course_modules ADD COLUMN skills TEXT"); } catch (Throwable $e) {}   // JSON array of practical skills
@@ -184,6 +187,41 @@ function lms_seed_demo(PDO $p): void {
     // Attach an in-progress demo record so tracking is visible: Amna (enrolment 3, course 1)
     $lp = $p->prepare("INSERT OR IGNORE INTO learner_progress (enrolment_id,module_id,status,score,attempts,updated_at) VALUES (?,?,?,?,?,datetime('now'))");
     $lp->execute([3,$scormModuleId,'completed',100,1]);
+}
+
+/** The first module of a course (lowest position) - the compulsory LLN step. */
+function lms_first_module(PDO $p, int $courseId): ?array {
+    $st = $p->prepare("SELECT * FROM course_modules WHERE course_id=? AND active=1 ORDER BY position, id LIMIT 1");
+    $st->execute([$courseId]);
+    return $st->fetch() ?: null;
+}
+
+/** True if a given module is completed for an enrolment. */
+function lms_module_completed(PDO $p, int $enrolmentId, int $moduleId): bool {
+    $st = $p->prepare("SELECT status FROM learner_progress WHERE enrolment_id=? AND module_id=?");
+    $st->execute([$enrolmentId, $moduleId]);
+    return $st->fetchColumn() === 'completed';
+}
+
+/** Human labels for the common AVETMISS demographic codes (falls back to the raw code). */
+function anb_demo_label(string $field, ?string $code): string {
+    $code = trim((string)$code);
+    if ($code === '' ) return '—';
+    $maps = [
+        'school' => ['12'=>'Completed Year 12','11'=>'Completed Year 11','10'=>'Completed Year 10','09'=>'Completed Year 9',
+                     '08'=>'Completed Year 8 or below','02'=>'Did not attend school','@@'=>'Not stated'],
+        'indig'  => ['1'=>'Aboriginal','2'=>'Torres Strait Islander','3'=>'Both Aboriginal & Torres Strait Islander',
+                     '4'=>'Neither','@'=>'Not stated'],
+        'labour' => ['01'=>'Full-time employee','02'=>'Part-time employee','03'=>'Self-employed (not employing)',
+                     '04'=>'Employer','05'=>'Employed - unpaid family worker','06'=>'Unemployed - seeking full-time work',
+                     '07'=>'Unemployed - seeking part-time work','08'=>'Not employed, not seeking work','@@'=>'Not stated'],
+        'lang'   => ['1201'=>'English','5203'=>'Tagalog / Filipino','5207'=>'Tagalog','4202'=>'Arabic','5206'=>'Bisaya',
+                     '5212'=>'Cebuano','6512'=>'Nepali','6511'=>'Hindi','7101'=>'Tongan','9799'=>'Another language'],
+        'country'=> ['1101'=>'Australia','7103'=>'India','5204'=>'Philippines','9124'=>'Other','7105'=>'Nepal',
+                     '7106'=>'Sri Lanka','1502'=>'Fiji','1201'=>'New Zealand'],
+        'disab'  => ['Y'=>'Yes','N'=>'No'],
+    ];
+    return $maps[$field][$code] ?? $code;
 }
 
 /** Modules for a course, ordered. */

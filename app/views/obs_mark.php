@@ -9,7 +9,10 @@
   <input type="hidden" name="module_id" value="<?= (int)$module['id'] ?>">
   <input type="hidden" name="enrol" value="<?= (int)$enrolId ?>">
   <div class="card p-3 mb-3">
-    <div class="text-muted small mb-2">Mark each skill the learner demonstrated during the face-to-face practical assessment.</div>
+    <div class="d-flex justify-content-between align-items-center mb-2 gap-2 flex-wrap">
+      <div class="text-muted small">Mark each skill the learner demonstrated during the face-to-face practical assessment.</div>
+      <button type="button" class="btn btn-sm btn-outline-success" onclick="anbAllSatisfactory()"><i class="bi bi-check2-all"></i> Mark all Satisfactory</button>
+    </div>
     <table class="table table-sm align-middle mb-0">
       <thead><tr><th>Skill demonstrated</th><th class="text-center" style="width:90px;">S</th><th class="text-center" style="width:130px;">NYS</th></tr></thead>
       <tbody>
@@ -40,3 +43,9 @@
     <button class="btn btn-anb mt-3"><i class="bi bi-save"></i> Save observation</button>
   </div>
 </form>
+<script>
+function anbAllSatisfactory(){
+  document.querySelectorAll('input[type=radio][value="S"]').forEach(function(r){ r.checked = true; });
+  var o = document.querySelector('input[name="overall"][value="satisfactory"]'); if (o) o.checked = true;
+}
+</script>

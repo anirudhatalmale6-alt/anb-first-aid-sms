@@ -36,7 +36,9 @@
         <div class="small text-muted mb-3">
           Merge fields you can use: <code>{first_name}</code> <code>{last_name}</code> <code>{course}</code>
           <code>{certificate_number}</code> <code>{certificate_link}</code> <code>{issue_date}</code> <code>{expiry_date}</code>
-          <code>{class_date}</code> <code>{location}</code> <code>{survey_link}</code> <code>{booking_link}</code> <code>{portal_link}</code>
+          <code>{class_date}</code> <code>{start_date}</code> <code>{start_time}</code> <code>{location}</code> <code>{location_address}</code>
+          <code>{email}</code> <code>{password}</code> <code>{login_url}</code>
+          <code>{survey_link}</code> <code>{booking_link}</code> <code>{portal_link}</code>
         </div>
         <button class="btn btn-anb"><i class="bi bi-save"></i> Save template</button>
         <?php if (!empty($edit)): ?>

@@ -36,6 +36,51 @@ function anb_setting_save(PDO $pdo, string $k, string $v): void {
         ->execute([$k,$v]);
 }
 
+/** Google review URL for a location, falling back to the default link. Empty string if none set. */
+function anb_review_link(PDO $pdo, ?int $locationId): string {
+    $s = anb_settings($pdo);
+    if ($locationId && !empty($s['review_url_'.$locationId])) return $s['review_url_'.$locationId];
+    return $s['review_url_default'] ?? '';
+}
+
+/** Ensure the students.review_emailed_at column exists (once-per-student guard). */
+function anb_review_request_schema(PDO $pdo): void {
+    $cols = $pdo->query("PRAGMA table_info(students)")->fetchAll(PDO::FETCH_COLUMN, 1);
+    if (!in_array('review_emailed_at', $cols, true)) {
+        $pdo->exec("ALTER TABLE students ADD COLUMN review_emailed_at TEXT");
+    }
+}
+
+/**
+ * Email a student a Google review request (sent once, right after their certificate
+ * is issued). Best-effort: returns [bool ok, string msg]; never throws to the caller.
+ * Only sends if: valid email, not already sent, and a review link exists for the location.
+ */
+function anb_send_review_request(PDO $pdo, int $studentId, ?string $email, ?string $firstName, ?int $locationId): array {
+    anb_review_request_schema($pdo);
+    if (!$email || strpos($email, '@') === false) return [false, 'no valid email'];
+    $chk = $pdo->prepare("SELECT review_emailed_at FROM students WHERE id=?");
+    $chk->execute([$studentId]);
+    if (!empty($chk->fetchColumn())) return [false, 'already sent'];
+    $url = anb_review_link($pdo, $locationId);
+    if ($url === '') return [false, 'no review link configured'];
+    $s = anb_settings($pdo);
+    $company = $s['mail_from_name'] ?: 'A&B First Aid Training';
+    $fn = $firstName !== null && $firstName !== '' ? $firstName : 'there';
+    $E = function ($t) { return htmlspecialchars((string)$t, ENT_QUOTES, 'UTF-8'); };
+    $subject = 'How did we go? A quick favour, ' . $fn;
+    $body = '<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#16232d;line-height:1.6;max-width:560px">'
+        . '<p>Hi ' . $E($fn) . ',</p>'
+        . '<p>Congratulations on completing your course with ' . $E($company) . ' and receiving your certificate!</p>'
+        . '<p>We\'re a small local team and a quick Google review makes a huge difference. It only takes 30 seconds - would you mind sharing how we went?</p>'
+        . '<p style="text-align:center;margin:26px 0"><a href="' . $E($url) . '" style="background:#f4b400;color:#16232d;font-weight:bold;text-decoration:none;padding:13px 26px;border-radius:8px;display:inline-block">Leave us a Google review</a></p>'
+        . '<p>Thank you so much - it really helps other people find us.</p>'
+        . '<p>Kind regards,<br>' . $E($company) . '</p></div>';
+    [$ok, $msg] = anb_send_mail($pdo, $email, $subject, $body);
+    if ($ok) $pdo->prepare("UPDATE students SET review_emailed_at=datetime('now') WHERE id=?")->execute([$studentId]);
+    return [$ok, $msg];
+}
+
 /** Replace {merge_field} tokens in a string. Unknown tokens left as-is. */
 function anb_merge(string $text, array $vars): string {
     foreach ($vars as $k=>$v) $text = str_replace('{'.$k.'}', (string)$v, $text);

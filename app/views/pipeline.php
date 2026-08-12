@@ -122,7 +122,18 @@ $stamp = function ($t) { return $t ? date('j M, g:ia', strtotime($t . ' UTC')) :
           <?php endif; ?>
         </td>
         <td class="pipe-td"><?= dot($r['online_complete']) ?></td>
-        <td class="pipe-td"><?= dot($r['avetmiss_complete']) ?></td>
+        <td class="pipe-td">
+          <?php $am = $r['avetmiss_missing'] ?? []; ?>
+          <?php if (!$am): ?>
+            <span class="pdot bg-success" title="All government reporting details are on file"></span>
+          <?php else: ?>
+            <a href="?r=student&id=<?= (int)$r['student_id'] ?>" class="text-decoration-none"
+               title="Still needed: <?= e(implode(', ', $am)) ?>">
+              <span class="pdot bg-danger"></span>
+              <div class="text-danger" style="font-size:.62rem;"><?= count($am) ?> missing</div>
+            </a>
+          <?php endif; ?>
+        </td>
         <td class="pipe-td"><?= dot((bool)$r['usi_number']) ?></td>
         <td class="pipe-td"><?= dot($paid, $r['payment_status']==='part') ?></td>
         <td class="pipe-td"><?= dot($r['id_confirmed']) ?></td>

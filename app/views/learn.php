@@ -4,16 +4,19 @@ $backUrl = !empty($_SESSION['student_id']) ? '?r=my' : '?r=content';
 $isPreview = empty($enrolment);
 ?>
 <div style="background:#f4f5f7;min-height:100vh;">
-  <div style="background:#2F1D3A;color:#fff;padding:12px 24px;display:flex;justify-content:space-between;align-items:center;">
-    <div style="display:flex;align-items:center;gap:10px;">
-      <span class="logo-badge">A&amp;B</span>
-      <div><div style="font-weight:700;"><?= e($module['title']) ?></div>
+  <div style="background:linear-gradient(135deg,#2F1D3A,#4a2d5c);color:#fff;padding:12px 24px;display:flex;justify-content:space-between;align-items:center;box-shadow:0 2px 10px rgba(0,0,0,.12);">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <img src="assets/logo.png" alt="A&amp;B First Aid Training" style="height:38px;width:auto;">
+      <div style="border-left:1px solid rgba(255,255,255,.25);padding-left:12px;"><div style="font-weight:700;"><?= e($module['title']) ?></div>
         <div style="font-size:.8rem;opacity:.8;"><?= e($module['course_code']) ?> — <?= e($module['course_title']) ?></div></div>
     </div>
     <a href="<?= e($backUrl) ?>" style="color:#ffb3b0;text-decoration:none;"><i class="bi bi-arrow-left"></i> Back</a>
   </div>
 
   <div style="max-width:900px;margin:0 auto;padding:22px 16px;">
+  <?php $flash = $_SESSION['flash'] ?? null; unset($_SESSION['flash']); if ($flash): ?>
+    <div class="alert alert-warning py-2 small"><i class="bi bi-info-circle"></i> <?= e($flash) ?></div>
+  <?php endif; ?>
   <?php if ($isPreview): ?>
     <div class="alert alert-info py-2 small"><i class="bi bi-eye"></i> Preview mode (staff) — progress is not recorded.</div>
   <?php endif; ?>
@@ -137,7 +140,19 @@ $isPreview = empty($enrolment);
     <div class="card p-2 mb-2">
       <iframe id="scoframe" src="<?= e($src) ?>" style="width:100%;height:520px;border:0;border-radius:10px;"></iframe>
     </div>
-    <div id="scoStatus" class="small text-muted"><i class="bi bi-hourglass-split"></i> Module in progress…</div>
+    <div id="scoStatus" class="small text-muted mb-3"><i class="bi bi-hourglass-split"></i> Working through this module… your progress saves automatically.</div>
+
+    <?php if (!$isPreview): ?>
+    <div class="card p-3 mb-4" style="border-left:4px solid #2e7d32;background:#f6fbf7;">
+      <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <div class="small"><i class="bi bi-info-circle text-success"></i> When you've finished reading this module, click the green button to record it and move on. Your completion is saved here in your student portal — you don't need to do anything anywhere else.</div>
+        <form method="post" action="?r=module_complete" class="ms-auto">
+          <input type="hidden" name="module_id" value="<?= (int)$module['id'] ?>">
+          <button class="btn btn-success"><i class="bi bi-check2-circle"></i> Mark module complete &amp; continue</button>
+        </form>
+      </div>
+    </div>
+    <?php endif; ?>
 
     <script>
     // ---- SCORM run-time API adapter (this window is the LMS to the content iframe) ----
@@ -191,14 +206,21 @@ $isPreview = empty($enrolment);
     </script>
 
   <?php elseif (isset($quizResult)):
-      $qr = $quizResult; ?>
+      $qr = $quizResult;
+      $max = $attemptsMax ?? 3; $att = $attempts ?? 0; $left = max(0, $max - $att);
+      $locked = !empty($lockNow); ?>
     <div class="card p-4 mb-3 text-center">
       <div style="font-size:2.6rem;font-weight:800;color:<?= $qr['passed']?'#2e7d32':'#c62828' ?>;"><?= $qr['pct'] ?>%</div>
       <div class="mb-2"><?= $qr['correct'] ?> of <?= $qr['total'] ?> correct · pass mark <?= (int)$module['pass_mark'] ?>%</div>
       <?php if ($qr['passed']): ?>
         <span class="badge text-bg-success fs-6">Passed<?= $isPreview?'' : ' — completion recorded' ?></span>
+      <?php elseif ($locked): ?>
+        <span class="badge text-bg-danger fs-6">Not passed — you've used all <?= (int)$max ?> attempts</span>
       <?php else: ?>
-        <span class="badge text-bg-danger fs-6">Not passed — please review and try again</span>
+        <span class="badge text-bg-warning fs-6">Not passed<?= $isPreview?'':' — '.(int)$left.' attempt'.($left==1?'':'s').' left' ?></span>
+      <?php endif; ?>
+      <?php if (!$qr['passed'] && !empty($qr['remaining'])): ?>
+        <div class="small text-muted mt-2"><i class="bi bi-arrow-repeat"></i> <?= (int)$qr['remaining'] ?> question<?= $qr['remaining']==1?'':'s' ?> still to get right<?= $locked?'.':' — your next attempt will only re-test those.' ?></div>
       <?php endif; ?>
     </div>
     <div class="card p-3 mb-3">
@@ -209,37 +231,112 @@ $isPreview = empty($enrolment);
         </div>
       <?php endforeach; ?>
     </div>
-    <div class="text-center">
-      <a href="?r=learn&module_id=<?= (int)$module['id'] ?>" class="btn btn-outline-secondary"><i class="bi bi-arrow-repeat"></i> Retake</a>
-      <a href="<?= e($backUrl) ?>" class="btn btn-anb"><i class="bi bi-arrow-left"></i> Back to my learning</a>
-    </div>
+    <?php if ($locked): ?>
+      <div class="card p-4 mb-3 text-center" style="border-left:4px solid #c62828;">
+        <h6 class="fw-bold text-danger"><i class="bi bi-book"></i> Time to review before your next attempts</h6>
+        <p class="small mb-3">You've used all <?= (int)$max ?> attempts for now. Please go back and read through the learning modules again carefully — then you can unlock a fresh set of attempts and try the quiz once more.</p>
+        <div class="d-flex justify-content-center gap-2 flex-wrap">
+          <a href="<?= e($backUrl) ?>" class="btn btn-anb"><i class="bi bi-journal-text"></i> Review the learning modules</a>
+          <?php if (!$isPreview): ?>
+          <a href="?r=quiz_reset&module_id=<?= (int)$module['id'] ?>" class="btn btn-outline-secondary"
+             onclick="return confirm('Only continue once you have re-read the modules. Unlock the quiz for another set of attempts?')">
+            <i class="bi bi-unlock"></i> I've reviewed — unlock the quiz</a>
+          <?php endif; ?>
+        </div>
+      </div>
+    <?php else: ?>
+      <div class="text-center">
+        <?php if (!$qr['passed']): ?><a href="?r=learn&module_id=<?= (int)$module['id'] ?>" class="btn btn-outline-secondary"><i class="bi bi-arrow-repeat"></i> Try again<?= $isPreview?'':' ('.(int)$left.' left)' ?></a><?php endif; ?>
+        <a href="<?= e($backUrl) ?>" class="btn btn-anb"><i class="bi bi-arrow-left"></i> Back to my learning</a>
+      </div>
+    <?php endif; ?>
 
-  <?php else: // quiz form ?>
+  <?php elseif (!empty($lockout)): // quiz locked - review modules first ?>
+    <div class="card p-4 mb-3 text-center" style="border-left:4px solid #c62828;">
+      <div style="font-size:2rem;"><i class="bi bi-lock-fill text-danger"></i></div>
+      <h5 class="fw-bold" style="color:#2F1D3A;">Please review before trying again</h5>
+      <p class="small mb-3">You've used all <?= (int)($attemptsMax ?? 3) ?> attempts on this quiz. Take a little time to read through the learning modules again — once you're ready, unlock the quiz for a fresh set of attempts.</p>
+      <div class="d-flex justify-content-center gap-2 flex-wrap">
+        <a href="<?= e($backUrl) ?>" class="btn btn-anb"><i class="bi bi-journal-text"></i> Review the learning modules</a>
+        <?php if (!$isPreview): ?>
+        <a href="?r=quiz_reset&module_id=<?= (int)$module['id'] ?>" class="btn btn-outline-secondary"
+           onclick="return confirm('Only continue once you have re-read the modules. Unlock the quiz for another set of attempts?')">
+          <i class="bi bi-unlock"></i> I've reviewed — unlock the quiz</a>
+        <?php endif; ?>
+      </div>
+    </div>
+  <?php else: // quiz form
+      $isDiagnostic = ((int)$module['pass_mark'] === 0); ?>
+    <?php if (!empty($module['body'])): ?>
+      <div class="card p-4 mb-3" style="border-left:4px solid #E53935;">
+        <div class="small" style="white-space:pre-line;line-height:1.6;"><?= e($module['body']) ?></div>
+      </div>
+    <?php endif; ?>
     <div class="card p-4">
       <h5 class="fw-bold mb-1" style="color:#2F1D3A;"><?= e($module['title']) ?></h5>
-      <p class="text-muted small">Answer all questions. You need <?= (int)$module['pass_mark'] ?>% to pass.</p>
+      <p class="text-muted small mb-2">
+        <?php if ($isDiagnostic): ?>Answer all the questions below, then submit to complete this assessment.
+        <?php else: ?>You need <?= (int)$module['pass_mark'] ?>% to pass.<?php endif; ?>
+        <?php if (!$isPreview && !$isDiagnostic && isset($attempts)): $left = max(0,(int)($attemptsMax??3)-(int)$attempts); ?>
+          <span class="badge text-bg-light border"><?= (int)$left ?> of <?= (int)($attemptsMax??3) ?> attempts left</span>
+        <?php endif; ?></p>
+      <?php if (!empty($retakeWrongOnly)): ?>
+        <div class="alert alert-warning py-2 small"><i class="bi bi-arrow-repeat"></i> You're only re-attempting the <strong><?= (int)$retakeWrongOnly ?></strong> question<?= $retakeWrongOnly==1?'':'s' ?> you didn't get right last time — get <?= $retakeWrongOnly==1?'it':'them all' ?> correct to complete the quiz.</div>
+      <?php endif; ?>
       <?php if (!$questions): ?>
         <p class="text-muted">No questions have been added to this quiz yet.</p>
-      <?php else: ?>
-      <form method="post" action="?r=quiz_submit">
+      <?php else:
+        $perSection = 5;
+        $sections = array_chunk($questions, $perSection, true);
+        $numSec = count($sections); ?>
+      <div class="alert alert-light border py-2 small"><i class="bi bi-list-ol text-danger"></i> This quiz is split into <?= $numSec ?> short sections so it's easy to work through. Use <strong>Next</strong> and <strong>Back</strong> to move between them, then submit on the last section.</div>
+      <div class="progress mb-2" style="height:6px;"><div id="quizbar" class="progress-bar bg-danger" style="width:<?= $numSec?round(100/$numSec):100 ?>%"></div></div>
+      <div class="small text-muted mb-3">Section <span id="secNow">1</span> of <?= $numSec ?></div>
+      <form method="post" action="?r=quiz_submit" id="quizform">
         <input type="hidden" name="module_id" value="<?= (int)$module['id'] ?>">
-        <?php foreach ($questions as $i=>$q):
-          $opts = (array)json_decode($q['options'] ?? '[]', true);
-          $multi = $q['qtype']==='multi'; ?>
-          <div class="mb-4">
-            <div class="fw-semibold mb-2"><?= ($i+1).'. '.e($q['question']) ?>
-              <?php if ($multi): ?><span class="badge text-bg-light text-muted">select all that apply</span><?php endif; ?></div>
-            <?php foreach ($opts as $oi=>$ot): ?>
-              <label class="d-block border rounded px-3 py-2 mb-2" style="cursor:pointer;">
-                <input class="form-check-input me-2" type="<?= $multi?'checkbox':'radio' ?>"
-                       name="a[<?= (int)$q['id'] ?>]<?= $multi?'[]':'' ?>" value="<?= $oi ?>" <?= $multi?'':'required' ?>>
-                <?= e($ot) ?>
-              </label>
-            <?php endforeach; ?>
-          </div>
+        <?php $qn=0; foreach ($sections as $si=>$chunk): ?>
+        <div class="quizsec" data-sec="<?= $si ?>" style="<?= $si===0?'':'display:none;' ?>">
+          <?php foreach ($chunk as $q): $qn++;
+            $opts = (array)json_decode($q['options'] ?? '[]', true);
+            $multi = $q['qtype']==='multi'; ?>
+            <div class="mb-4">
+              <div class="fw-semibold mb-2"><?= $qn.'. '.e($q['question']) ?>
+                <?php if ($multi): ?><span class="badge text-bg-light text-muted">select all that apply</span><?php endif; ?></div>
+              <?php foreach ($opts as $oi=>$ot): ?>
+                <label class="d-block border rounded px-3 py-2 mb-2" style="cursor:pointer;">
+                  <input class="form-check-input me-2" type="<?= $multi?'checkbox':'radio' ?>"
+                         name="a[<?= (int)$q['id'] ?>]<?= $multi?'[]':'' ?>" value="<?= $oi ?>">
+                  <?= e($ot) ?>
+                </label>
+              <?php endforeach; ?>
+            </div>
+          <?php endforeach; ?>
+        </div>
         <?php endforeach; ?>
-        <button class="btn btn-anb w-100"><i class="bi bi-send"></i> Submit answers</button>
+        <div class="d-flex justify-content-between">
+          <button type="button" id="qprev" class="btn btn-outline-secondary" style="visibility:hidden;"><i class="bi bi-arrow-left"></i> Back</button>
+          <button type="button" id="qnext" class="btn btn-anb">Next <i class="bi bi-arrow-right"></i></button>
+          <button type="submit" id="qsubmit" class="btn btn-success" style="display:none;"><i class="bi bi-send"></i> Submit answers</button>
+        </div>
       </form>
+      <script>
+      (function(){
+        var secs=[].slice.call(document.querySelectorAll('.quizsec')), cur=0, n=secs.length;
+        var prev=document.getElementById('qprev'), next=document.getElementById('qnext'),
+            sub=document.getElementById('qsubmit'), bar=document.getElementById('quizbar'), now=document.getElementById('secNow');
+        function show(i){
+          secs.forEach(function(s,idx){s.style.display=idx===i?'block':'none';});
+          cur=i; now.textContent=(i+1); bar.style.width=Math.round((i+1)/n*100)+'%';
+          prev.style.visibility=i===0?'hidden':'visible';
+          next.style.display=i===n-1?'none':'inline-block';
+          sub.style.display=i===n-1?'inline-block':'none';
+          window.scrollTo({top:0,behavior:'smooth'});
+        }
+        next.onclick=function(){ if(cur<n-1) show(cur+1); };
+        prev.onclick=function(){ if(cur>0) show(cur-1); };
+        show(0);
+      })();
+      </script>
       <?php endif; ?>
     </div>
   <?php endif; ?>

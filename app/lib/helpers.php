@@ -20,6 +20,38 @@ function require_login(): void {
 
 function redirect(string $to): void { header("Location: $to"); exit; }
 
+/** Role-based access. Admin sees everything; other roles are limited to their area. */
+function role_routes(string $role): array {
+    $office = ['dashboard','students','student','enrolments','enrol_new','enrol_create','enrol_move','enrol_move_save',
+      'schedules','schedule_save','schedule_duplicate','schedule_delete','pipeline','class_send_access','generate','signoff','cert','usi_verify',
+      'group_bookings','group_booking_view','group_booking_save','locations','location_save','location_delete',
+      'courses','certificates','reminders','emails','email_save','email_delete','email_settings','email_settings_save',
+      'email_test','cert_email','surveys','survey_view','avetmiss','avetmiss_export','avetmiss_preview',
+      'student_send_access','student_portal','student_portal_batch','review_links','review_links_save',
+      // RTO Data Cloud: office can view/retry a push, but only admin can change the off/dry/live mode
+      'rto_sync','rto_sync_push','rto_sync_map'];
+    $trainer = ['dashboard','trainer','students','student','schedules','pipeline','class_send_access','obs_list','obs_mark','obs_save',
+      'form_subs','form_view','content','quiz_edit','signoff','generate','cert','usi_verify',
+      'my_trainer','my_trainer_save','my_trainer_qual','my_trainer_declare','my_trainer_insurance',
+      'trainer_cert_download','trainer_ins_download'];
+    $compliance = ['dashboard','compliance','comp_save','comp_download','comp_archive','ci_save','comp_equip_save',
+      'trainer_save','trainer_qual_save','trainer_cert_download','user_save','management','management_upload',
+      'management_download','management_delete'];
+    $auditor = ['dashboard','compliance','comp_download','trainer_cert_download','management_download'];
+    switch ($role) {
+        case 'office':              return $office;
+        case 'trainer':             return $trainer;
+        case 'compliance_manager':  return $compliance;
+        case 'auditor':             return $auditor;
+        default:                    return ['*']; // admin / unknown -> full
+    }
+}
+function role_allowed(string $route): bool {
+    $u = current_user(); if (!$u) return false;
+    $allowed = role_routes($u['role'] ?? 'admin');
+    return in_array('*', $allowed, true) || in_array($route, $allowed, true);
+}
+
 /** AVETMISS national outcome code -> label */
 function outcome_label(string $code): string {
     return [

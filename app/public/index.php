@@ -225,8 +225,12 @@ if ($r === 'my_details' || $r === 'my_details_save') {
         $indig  = $_POST['indigenous_status'] ?? '';   if (in_array($indig,['1','2','3','4','9'],true))          { $sets[]="indigenous_status=?"; $vals[]=$indig; }
         $lab    = $_POST['labour_force_status'] ?? '';  if (in_array($lab,['01','02','05','07','09'],true))       { $sets[]="labour_force_status=?"; $vals[]=$lab; }
         $dis    = $_POST['disability_flag'] ?? '';      if (in_array($dis,['Y','N'],true))                        { $sets[]="disability_flag=?"; $vals[]=$dis; }
-        if (($_POST['born_au'] ?? '')==='yes')  { $sets[]="country_of_birth=?"; $vals[]='1101'; }
-        if (($_POST['eng_main'] ?? '')==='yes') { $sets[]="main_language=?";   $vals[]='1201'; }
+        // Country / language as real codes (the old yes/no pair discarded every "No").
+        require_once __DIR__.'/../lib/avetmiss.php';
+        $cob = $_POST['country_of_birth'] ?? ''; if (isset(avetmiss_country_options()[$cob]))  { $sets[]="country_of_birth=?"; $vals[]=$cob; }
+        elseif (($_POST['born_au'] ?? '')==='yes')  { $sets[]="country_of_birth=?"; $vals[]='1101'; }
+        $lng = $_POST['main_language'] ?? '';    if (isset(avetmiss_language_options()[$lng])) { $sets[]="main_language=?";   $vals[]=$lng; }
+        elseif (($_POST['eng_main'] ?? '')==='yes') { $sets[]="main_language=?";   $vals[]='1201'; }
         // If the USI changed, it must be re-verified before a certificate can be issued.
         $curUsi = (string)($pdo->query("SELECT usi_number FROM students WHERE id=".$sid)->fetchColumn() ?: '');
         if (trim($_POST['usi_number'] ?? '') !== $curUsi) { $sets[]="usi_verified=0"; $sets[]="usi_verified_date=NULL"; $sets[]="usi_verified_method=NULL"; }
@@ -266,8 +270,13 @@ if ($r === 'selfenrol') {
         $indig=$_POST['indigenous_status']??''; if(in_array($indig,['1','2','3','4','9'],true)){$sets[]="indigenous_status=?";$vals[]=$indig;}
         $lab=$_POST['labour_force_status']??''; if(in_array($lab,['01','02','05','07','09'],true)){$sets[]="labour_force_status=?";$vals[]=$lab;}
         $dis=$_POST['disability_flag']??''; if(in_array($dis,['Y','N'],true)){$sets[]="disability_flag=?";$vals[]=$dis;}
-        if(($_POST['born_au']??'')==='yes'){$sets[]="country_of_birth=?";$vals[]='1101';}
-        if(($_POST['eng_main']??'')==='yes'){$sets[]="main_language=?";$vals[]='1201';}
+        // Country / language now come through as real codes. The old yes/no pair
+        // threw away every "No" answer, leaving overseas-born students unreportable.
+        require_once __DIR__.'/../lib/avetmiss.php';
+        $cob=$_POST['country_of_birth']??''; if(isset(avetmiss_country_options()[$cob])){$sets[]="country_of_birth=?";$vals[]=$cob;}
+        elseif(($_POST['born_au']??'')==='yes'){$sets[]="country_of_birth=?";$vals[]='1101';}
+        $lng=$_POST['main_language']??''; if(isset(avetmiss_language_options()[$lng])){$sets[]="main_language=?";$vals[]=$lng;}
+        elseif(($_POST['eng_main']??'')==='yes'){$sets[]="main_language=?";$vals[]='1201';}
         if ($sets){ $vals[]=$sid; $pdo->prepare("UPDATE students SET ".implode(',',$sets)." WHERE id=?")->execute($vals); }
         // enrol into this class (guard duplicates)
         $dup=$pdo->prepare("SELECT COUNT(*) FROM enrolments WHERE student_id=? AND schedule_id=?"); $dup->execute([$sid,$cid]);
@@ -672,12 +681,15 @@ case 'usi_verify':
 
 case 'signoff':
     require __DIR__ . '/../lib/certificate.php';
+    require_once __DIR__ . '/../lib/avetmiss.php';
     $sid = (int)($_GET['schedule_id'] ?? 0);
-    // find ready enrolments in this schedule not yet issued
+    // find ready enrolments in this schedule not yet issued.
+    // AVETMISS readiness is read off the student record, not the stored flag -
+    // nothing ever set that flag, so this query used to match nobody, ever.
     $q = $pdo->prepare("
         SELECT e.id FROM enrolments e JOIN students s ON s.id=e.student_id
         WHERE e.schedule_id=? AND e.status!='issued'
-          AND e.online_complete=1 AND e.avetmiss_complete=1 AND e.id_confirmed=1
+          AND e.online_complete=1 AND ".avetmiss_sql_complete('s')." AND e.id_confirmed=1
           AND e.attendance_marked=1 AND e.tasks_satisfactory=1 AND e.payment_status='paid'
           AND s.usi_number IS NOT NULL AND s.usi_number<>'' AND s.usi_verified=1");
     $q->execute([$sid]);
@@ -712,12 +724,20 @@ case 'pipeline':
     $sc->execute([$sid]); $schedule = $sc->fetch();
     if (!$schedule) { http_response_code(404); echo 'Schedule not found'; break; }
     require_once __DIR__.'/../lib/student_portal.php'; sp_schema($pdo);
+    require_once __DIR__.'/../lib/avetmiss.php';
     $st = $pdo->prepare("
         SELECT e.*, s.first_name, s.last_name, s.usi_number, s.email,
-               s.portal_emailed_at, s.portal_attempted_at, s.portal_error
+               s.portal_emailed_at, s.portal_attempted_at, s.portal_error,
+               ".avetmiss_select_columns('s')."
         FROM enrolments e JOIN students s ON s.id=e.student_id
         WHERE e.schedule_id=? ORDER BY s.last_name");
     $st->execute([$sid]); $rows = $st->fetchAll();
+    // AVETMISS readiness is worked out from the record itself - see lib/avetmiss.php.
+    foreach ($rows as $i => $rw) {
+        $miss = avetmiss_missing($rw);
+        $rows[$i]['avetmiss_missing']  = $miss;
+        $rows[$i]['avetmiss_complete'] = $miss ? 0 : 1;
+    }
     render('pipeline', compact('schedule','rows'), 'Class pipeline');
     break;
 

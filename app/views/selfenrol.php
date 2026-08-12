@@ -1,4 +1,4 @@
-<?php $states=['NSW','VIC','QLD','SA','WA','TAS','NT','ACT']; $f=$f??[]; ?>
+<?php require_once __DIR__.'/../lib/avetmiss.php'; $states=['NSW','VIC','QLD','SA','WA','TAS','NT','ACT']; $f=$f??[]; ?>
 <div style="min-height:100vh;background:linear-gradient(135deg,#E53935,#8e24aa);padding:30px 16px;">
   <div class="card p-4 mx-auto" style="max-width:760px;">
     <div class="text-center mb-3"><img src="assets/logo-color.png" alt="A&amp;B First Aid Training" style="max-width:200px;width:70%;height:auto;"></div>
@@ -46,8 +46,14 @@
         </div>
         <div class="mt-2"><div class="small fw-semibold" style="color:#2F1D3A;">A few background questions (for government reporting)</div></div>
         <div class="row g-2">
-          <div class="col-md-6"><label class="form-label small mb-0">Born in Australia?</label><select name="born_au" class="form-select form-select-sm"><option value="">—</option><option value="yes">Yes</option><option value="no">No / Other</option></select></div>
-          <div class="col-md-6"><label class="form-label small mb-0">English main language at home?</label><select name="eng_main" class="form-select form-select-sm"><option value="">—</option><option value="yes">Yes</option><option value="no">No / Other</option></select></div>
+          <div class="col-md-6"><label class="form-label small mb-0">Country of birth</label>
+            <select name="country_of_birth" class="form-select form-select-sm"><option value="">—</option>
+              <?php foreach (avetmiss_country_options() as $cCode=>$cName): ?><option value="<?= e($cCode) ?>"><?= e($cName) ?></option><?php endforeach; ?>
+            </select></div>
+          <div class="col-md-6"><label class="form-label small mb-0">Main language spoken at home</label>
+            <select name="main_language" class="form-select form-select-sm"><option value="">—</option>
+              <?php foreach (avetmiss_language_options() as $lCode=>$lName): ?><option value="<?= e($lCode) ?>"><?= e($lName) ?></option><?php endforeach; ?>
+            </select></div>
           <div class="col-md-6"><label class="form-label small mb-0">Highest school level</label><select name="highest_school_level" class="form-select form-select-sm"><option value="">—</option><option value="12">Year 12</option><option value="11">Year 11</option><option value="10">Year 10</option><option value="09">Year 9</option><option value="08">Year 8 or below</option><option value="02">Did not attend</option></select></div>
           <div class="col-md-6"><label class="form-label small mb-0">Aboriginal or Torres Strait Islander?</label><select name="indigenous_status" class="form-select form-select-sm"><option value="">—</option><option value="4">No</option><option value="1">Aboriginal</option><option value="2">Torres Strait Islander</option><option value="3">Both</option><option value="9">Prefer not to say</option></select></div>
           <div class="col-md-6"><label class="form-label small mb-0">Employment status</label><select name="labour_force_status" class="form-select form-select-sm"><option value="">—</option><option value="01">Employed full-time</option><option value="02">Employed part-time</option><option value="05">Self-employed</option><option value="07">Unemployed — seeking work</option><option value="09">Not employed — not seeking</option></select></div>

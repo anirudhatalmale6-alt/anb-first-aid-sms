@@ -12,7 +12,9 @@ const ANB_NAME  = 'A&B First Aid Training Pty Ltd';
 const ANB_ADDR  = '156 Queen Street, St Marys NSW 2760';
 const ANB_PHONE = '0423 427 765';
 const ANB_EMAIL = 'admin@anbfirstaidtraining.com.au';
-const ANB_VERIFY_BASE = 'https://portal.anbfirstaidtraining.com.au';
+// Host the certificate QR codes point at. MUST be a subdomain that actually
+// resolves - 'portal.' was never created, so every QR issued with it led nowhere.
+const ANB_VERIFY_BASE = 'https://sms.anbfirstaidtraining.com.au';
 
 /** Render a QR code PNG for $text. Returns the file path. */
 function anb_qr_png(string $text, string $file, int $scale = 4, int $margin = 2): string {
@@ -94,12 +96,18 @@ function anb_generate_certificate(PDO $pdo, int $enrolmentId): array {
     // load enrolment context
     $st = $pdo->prepare("
         SELECT e.*, s.first_name, s.middle_name, s.last_name, s.salutation, s.email,
+               s.usi_number, s.usi_verified,
                co.code course_code, co.title course_title, co.validity_months
         FROM enrolments e JOIN students s ON s.id=e.student_id JOIN courses co ON co.id=e.course_id
         WHERE e.id=?");
     $st->execute([$enrolmentId]);
     $e = $st->fetch();
     if (!$e) throw new RuntimeException('Enrolment not found');
+
+    // USI gate: a Statement of Attainment cannot be issued until the student's USI is verified.
+    if (empty($e['usi_verified'])) {
+        throw new RuntimeException('USI not verified for '.trim($e['first_name'].' '.$e['last_name']).' - verify the USI before issuing the certificate.');
+    }
 
     // ensure this enrolment has ALL its units from the course -> units mapping (add any missing)
     $exq = $pdo->prepare("SELECT unit_id FROM enrolment_units WHERE enrolment_id=?"); $exq->execute([$enrolmentId]);
@@ -151,8 +159,18 @@ function anb_generate_certificate(PDO $pdo, int $enrolmentId): array {
     $ins = $pdo->prepare("INSERT INTO certificates (enrolment_id,student_id,type,certificate_number,issue_date,expiry_date,file_path) VALUES (?,?,?,?,?,?,?)");
     $ins->execute([$enrolmentId, $e['student_id'], 'statement_of_attainment', $number, $issue, $expiry, 'certs/'.$number.'.pdf']);
     $pdo->prepare("UPDATE enrolments SET status='issued' WHERE id=?")->execute([$enrolmentId]);
+    $newId = (int)$pdo->lastInsertId();
 
-    return $pdo->query("SELECT * FROM certificates WHERE id=".(int)$pdo->lastInsertId())->fetch();
+    // Fire-and-forget: now that the student is certified (a NEW certificate, not a
+    // migrated/existing one), invite them to leave a Google review. Wrapped so it can
+    // never block certificate issuance. Sent once per student (see review_emailed_at).
+    try {
+        require_once __DIR__ . '/mailer.php';
+        anb_send_review_request($pdo, (int)$e['student_id'], $e['email'] ?? null,
+            $e['first_name'] ?? null, isset($e['location_id']) ? (int)$e['location_id'] : null);
+    } catch (Throwable $rev) { /* ignore - review email is non-critical */ }
+
+    return $pdo->query("SELECT * FROM certificates WHERE id=".$newId)->fetch();
 }
 
 /** Render the Statement of Attainment PDF - professional design. */
@@ -165,73 +183,56 @@ function anb_render_soa(string $out, string $qrFile, array $d): void {
     $purple = [47,29,58]; $red = [229,57,53]; $grey = [90,90,90];
     $sig = static function($p,$c){ $p->SetTextColor($c[0],$c[1],$c[2]); };
 
-    // ---- ornamental double border ----
-    $pdf->SetDrawColor(...$purple); $pdf->SetLineWidth(1.1);
-    $pdf->Rect(8, 8, $W-16, $H-16);
-    $pdf->SetDrawColor(...$red); $pdf->SetLineWidth(0.4);
-    $pdf->Rect(11, 11, $W-22, $H-22);
-    // corner accents (small filled squares as beads)
-    $pdf->SetFillColor(...$red);
-    foreach ([[9.4,9.4],[$W-11.4,9.4],[9.4,$H-11.4],[$W-11.4,$H-11.4]] as $c)
-        $pdf->Rect($c[0],$c[1],2,2,'F');
-
-    // ---- faint logo watermark (behind text) ----
-    if (is_file("$assets/anb_logo_wm.png"))
-        $pdf->Image("$assets/anb_logo_wm.png", ($W/2)-70, 118, 140, 0, 'PNG');
+    // ---- full-page decorative background (border, flourishes, watermark) ----
+    if (is_file("$assets/cert_bg.png"))
+        $pdf->Image("$assets/cert_bg.png", 0, 0, $W, $H, 'PNG');
 
     // ---- logo ----
     if (is_file("$assets/anb_logo.png"))
-        $pdf->Image("$assets/anb_logo.png", ($W/2)-28, 20, 56, 0, 'PNG');
+        $pdf->Image("$assets/anb_logo.png", ($W/2)-24, 18, 48, 0, 'PNG');
 
     // ---- title ----
-    $sig($pdf,$purple); $pdf->SetFont('Arial','B',27);
-    $pdf->SetXY(0,50); $pdf->Cell($W,13,'STATEMENT OF ATTAINMENT',0,1,'C');
-    // rule with centre bead
-    $pdf->SetDrawColor(...$red); $pdf->SetLineWidth(0.5);
-    $pdf->Line(45,66,$W-45,66);
-    $pdf->SetFillColor(...$red); $pdf->Rect(($W/2)-1.4,64.6,2.8,2.8,'F');
+    $sig($pdf,$purple); $pdf->SetFont('Arial','B',26);
+    $pdf->SetXY(0,44); $pdf->Cell($W,13,'STATEMENT OF ATTAINMENT',0,1,'C');
 
     // ---- blurb ----
-    $sig($pdf,$grey); $pdf->SetFont('Arial','I',10);
-    $pdf->SetXY(30,72);
-    $pdf->MultiCell($W-60,5,'A statement of attainment is issued by a Registered Training Organisation when an individual has completed one or more accredited units or modules.',0,'C');
+    $sig($pdf,$grey); $pdf->SetFont('Arial','',10);
+    $pdf->SetXY(28,62);
+    $pdf->MultiCell($W-56,5,'A statement of attainment is issued by a Registered Training Organisation when an individual has completed one or more accredited units or modules.',0,'C');
 
     // ---- recipient ----
     $pdf->SetFont('Arial','',11.5); $sig($pdf,$grey);
-    $pdf->SetXY(0,90); $pdf->Cell($W,6,'This is hereby awarded to',0,1,'C');
+    $pdf->SetXY(0,84); $pdf->Cell($W,6,'This is a statement that',0,1,'C');
     $sig($pdf,$purple); $pdf->SetFont('Arial','B',24);
-    $pdf->SetXY(0,98); $pdf->Cell($W,12,$d['name'],0,1,'C');
-    // underline flourish under name
-    $nameW = $pdf->GetStringWidth($d['name']);
-    $pdf->SetDrawColor(200,180,150); $pdf->SetLineWidth(0.3);
-    $pdf->Line(($W/2)-($nameW/2)-6,113,($W/2)+($nameW/2)+6,113);
+    $pdf->SetXY(0,93); $pdf->Cell($W,12,$d['name'],0,1,'C');
     $sig($pdf,$grey); $pdf->SetFont('Arial','',11);
-    $pdf->SetXY(0,116); $pdf->Cell($W,6,'for attaining the following nationally recognised unit(s) of competency:',0,1,'C');
+    $pdf->SetXY(0,111); $pdf->Cell($W,6,'has attained:',0,1,'C');
 
     // ---- units table ----
-    $y = 130; $lx = 32; $rx = $W-32;
-    $pdf->SetFont('Arial','B',9.5); $sig($pdf,$purple);
-    $pdf->SetXY($lx,$y); $pdf->Cell(28,7,'CODE',0,0,'L');
-    $pdf->Cell(96,7,'TITLE',0,0,'L');
-    $pdf->Cell($rx-$lx-124,7,'EXPIRY',0,1,'R');
+    $y = 126; $lx = 34; $rx = $W-34;
+    $pdf->SetFont('Arial','B',10); $sig($pdf,$purple);
+    $pdf->SetXY($lx,$y); $pdf->Cell(30,7,'Code',0,0,'L');
+    $pdf->Cell(92,7,'Title',0,0,'L');
+    $pdf->Cell($rx-$lx-122,7,'Expiry Date',0,1,'R');
     $pdf->SetDrawColor(...$red); $pdf->SetLineWidth(0.3); $pdf->Line($lx,$y+7,$rx,$y+7);
-    $pdf->SetFont('Arial','',10.5); $sig($pdf,[40,40,40]);
     $y += 9;
     foreach ($d['units'] as $un) {
-        $pdf->SetXY($lx,$y); $pdf->SetFont('Arial','B',10.5); $pdf->Cell(28,7,$un['code'],0,0,'L');
-        $pdf->SetFont('Arial','',10.5); $pdf->Cell(96,7,$un['title'],0,0,'L');
-        $pdf->Cell($rx-$lx-124,7,date('d-m-Y', strtotime($d['expiry'])),0,1,'R');
-        $pdf->SetDrawColor(230,230,230); $pdf->SetLineWidth(0.1); $pdf->Line($lx,$y+7.5,$rx,$y+7.5);
-        $y += 8.5;
+        // per-unit expiry: CPR (HLTAID009) is 12 months, all others 36 months
+        $months = (strpos((string)$un['code'],'HLTAID009')!==false) ? 12 : 36;
+        $exp = date('d-m-Y', strtotime($d['issue'].' +'.$months.' months'));
+        $pdf->SetXY($lx,$y); $pdf->SetFont('Arial','B',10.5); $sig($pdf,[40,40,40]); $pdf->Cell(30,7,$un['code'],0,0,'L');
+        $pdf->SetFont('Arial','',10.5); $pdf->Cell(92,7,$un['title'],0,0,'L');
+        $pdf->Cell($rx-$lx-122,7,$exp,0,1,'R');
+        $y += 9;
     }
 
-    // ---- date issued ----
-    $pdf->SetFont('Arial','',11); $sig($pdf,$grey);
-    $pdf->SetXY(0,$y+7); $pdf->Cell($W,6,'Date of Issue: '.date('d-m-Y', strtotime($d['issue'])),0,1,'C');
+    // ---- date issued (ordinal, e.g. 4th August 2026) ----
+    $pdf->SetFont('Arial','',11.5); $sig($pdf,$grey);
+    $pdf->SetXY(0,$y+8); $pdf->Cell($W,6,'Date Issued: '.date('jS F Y', strtotime($d['issue'])),0,1,'C');
 
     // ---- Nationally Recognised Training logo ----
     if (is_file("$assets/nrt_logo.png"))
-        $pdf->Image("$assets/nrt_logo.png", 30, 222, 30, 0, 'PNG');
+        $pdf->Image("$assets/nrt_logo.png", 34, 214, 34, 0, 'PNG');
 
     // ---- signatory ----
     if (!empty($d['signature']) && is_file($d['signature']))

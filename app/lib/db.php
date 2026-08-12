@@ -31,7 +31,7 @@ function db_migrate(PDO $p): void {
     );
     CREATE TABLE locations (
         id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, identifier TEXT,
-        suburb TEXT, state TEXT, postcode TEXT, active INTEGER DEFAULT 1
+        address TEXT, suburb TEXT, state TEXT, postcode TEXT, active INTEGER DEFAULT 1
     );
     CREATE TABLE units (
         id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
@@ -56,7 +56,7 @@ function db_migrate(PDO $p): void {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         salutation TEXT, first_name TEXT NOT NULL, middle_name TEXT, last_name TEXT NOT NULL,
         date_of_birth TEXT, gender TEXT,
-        usi_number TEXT, usi_verified INTEGER DEFAULT 0,
+        usi_number TEXT, usi_verified INTEGER DEFAULT 0, usi_verified_date TEXT, usi_verified_method TEXT,
         email TEXT, mobile_phone TEXT,
         unit_flat TEXT, street_number TEXT, street_name TEXT, suburb TEXT, state TEXT, postcode TEXT,
         town_of_birth TEXT, country_of_birth TEXT,

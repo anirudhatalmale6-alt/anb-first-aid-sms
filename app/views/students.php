@@ -1,7 +1,7 @@
 <div class="topbar">
   <div><h4 class="mb-0 fw-bold" style="color:#2F1D3A;">Students</h4>
     <div class="text-muted small"><?= count($rows) ?> record<?= count($rows)===1?'':'s' ?></div></div>
-  <a href="#" class="btn btn-anb"><i class="bi bi-plus-lg"></i> Add student</a>
+  <a href="?r=student_portal" class="btn btn-outline-danger"><i class="bi bi-envelope-paper"></i> Portal Access emails</a>
 </div>
 <div class="card p-3">
   <form class="mb-3" method="get">
