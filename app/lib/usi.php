@@ -129,6 +129,29 @@ function anb_usi_format_problem(string $usi): string {
     return '';
 }
 
+/**
+ * The registry's schema only accepts yyyy-mm-dd, and it rejects the whole
+ * request - not just the date - when it gets anything else. Student records
+ * hold a mix of ISO and D/M/Y depending on how the row was created, same as
+ * the RTO Data Cloud feed has to cope with.
+ *
+ * Returns '' when the date cannot be read, so the caller can say so plainly
+ * instead of sending rubbish to the registry.
+ */
+function anb_usi_dob(?string $date): string {
+    $date = trim((string)$date);
+    if ($date === '') return '';
+    if (preg_match('#^(\d{4})-(\d{1,2})-(\d{1,2})#', $date, $m)) {
+        $y = (int)$m[1]; $mo = (int)$m[2]; $d = (int)$m[3];
+    } elseif (preg_match('#^(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})$#', $date, $m)) {
+        $d = (int)$m[1]; $mo = (int)$m[2]; $y = (int)$m[3];
+    } else {
+        return '';
+    }
+    if (!checkdate($mo, $d, $y)) return '';
+    return sprintf('%04d-%02d-%02d', $y, $mo, $d);
+}
+
 /* --------------------------------------------------------------- verifying */
 
 /**
@@ -157,9 +180,14 @@ function anb_usi_verify_student(PDO $pdo, int $studentId, string $checkedBy = ''
     }
 
     $usi = strtoupper(trim((string)$s['usi_number']));
+    $dob = anb_usi_dob((string)$s['date_of_birth']);
     $problem = anb_usi_format_problem($usi);
     if ($problem === '' && empty($s['date_of_birth'])) {
         $problem = 'The registry needs a date of birth to check against.';
+    }
+    if ($problem === '' && $dob === '') {
+        $problem = 'The date of birth on this record (' . (string)$s['date_of_birth']
+                 . ') is not a date the registry can read. Fix it on the student record first.';
     }
     if ($problem !== '') {
         anb_usi_log($pdo, $studentId, $usi, $cfg, null, $problem, $checkedBy);
@@ -168,13 +196,13 @@ function anb_usi_verify_student(PDO $pdo, int $studentId, string $checkedBy = ''
 
     try {
         $client = anb_usi_client($pdo);
-        $r = $client->verifyUsi($usi, (string)$s['first_name'], (string)$s['last_name'], (string)$s['date_of_birth']);
+        $r = $client->verifyUsi($usi, (string)$s['first_name'], (string)$s['last_name'], $dob);
     } catch (Throwable $e) {
         // An expired or rejected token is worth one clean retry.
         try {
             $client = anb_usi_client($pdo);
             $client->forgetToken();
-            $r = $client->verifyUsi($usi, (string)$s['first_name'], (string)$s['last_name'], (string)$s['date_of_birth']);
+            $r = $client->verifyUsi($usi, (string)$s['first_name'], (string)$s['last_name'], $dob);
         } catch (Throwable $e2) {
             anb_usi_log($pdo, $studentId, $usi, $cfg, null, $e2->getMessage(), $checkedBy);
             return anb_usi_result(false, false, '', 'Could not reach the USI Registry: ' . $e2->getMessage(), []);
@@ -288,9 +316,12 @@ function anb_usi_verify_sandbox(PDO $pdo, string $by = ''): array {
 
 function anb_usi_log(PDO $pdo, ?int $studentId, string $usi, array $cfg, ?array $r, ?string $error, string $by): void {
     anb_usi_schema($pdo);
+    // checked_at is written explicitly rather than left to the column default,
+    // because datetime('now') is UTC and the tick on the student record is
+    // written in server local time - side by side they looked ten hours apart.
     $pdo->prepare("INSERT INTO usi_verify_log
-        (student_id, usi, env, org_code, status, first_name_result, family_name_result, dob_result, verified, error, checked_by)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)")
+        (student_id, usi, env, org_code, status, first_name_result, family_name_result, dob_result, verified, error, checked_by, checked_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
         ->execute([
             $studentId, $usi, $cfg['env'], $cfg['org_code'],
             $r['status'] ?? null,
@@ -298,7 +329,7 @@ function anb_usi_log(PDO $pdo, ?int $studentId, string $usi, array $cfg, ?array 
             $r['familyName'] ?? null,
             $r['dateOfBirth'] ?? null,
             !empty($r['verified']) ? 1 : 0,
-            $error, $by,
+            $error, $by, date('Y-m-d H:i:s'),
         ]);
 }
 
