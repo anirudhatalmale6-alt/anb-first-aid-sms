@@ -73,22 +73,32 @@ $badge = ['off' => 'secondary', 'test' => 'warning', 'live' => 'success'][$mode]
           uploaded to <code>app/data/usi/keystore-live.xml</code> outside the web root.
         </p>
 
+        <?php
+          // Show what is actually stored, whatever the current mode. anb_usi_config()
+          // substitutes the sandbox credential when mode is off/test, so reading the
+          // settings directly is the only way to see the real saved values - and if
+          // these boxes render empty, switching to Live and pressing Save wipes them.
+          $stored = anb_settings(db());
+          $storedOrg  = trim((string)($stored['usi_org_code'] ?? ''));
+          $storedCred = trim((string)($stored['usi_credential_id'] ?? ''));
+          $storedPw   = (string)($stored['usi_keystore_password'] ?? '');
+        ?>
         <div class="mb-2">
           <label class="form-label small fw-bold">Organisation code</label>
           <input class="form-control form-control-sm" name="usi_org_code"
-                 value="<?= e($mode === 'live' ? $cfg['org_code'] : '') ?>" placeholder="e.g. 46055">
+                 value="<?= e($storedOrg) ?>" placeholder="e.g. 46055">
           <div class="form-text">The code the USI Registry knows A&amp;B by - not the ABN.</div>
         </div>
         <div class="mb-2">
           <label class="form-label small fw-bold">Machine credential ID</label>
           <input class="form-control form-control-sm" name="usi_credential_id"
-                 value="<?= e($mode === 'live' ? $cfg['credential_id'] : '') ?>"
+                 value="<?= e($storedCred) ?>"
                  placeholder="ABRD:51660446908_...">
         </div>
         <div class="mb-3">
           <label class="form-label small fw-bold">Credential password</label>
           <input class="form-control form-control-sm" type="password" name="usi_keystore_password"
-                 placeholder="<?= $mode === 'live' && $cfg['password'] !== '' ? 'unchanged' : '' ?>"
+                 placeholder="<?= $storedPw !== '' ? 'unchanged' : '' ?>"
                  autocomplete="new-password">
           <div class="form-text">Leave blank to keep the stored one.</div>
         </div>

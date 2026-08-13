@@ -851,8 +851,12 @@ case 'usi_registry_save':
     if ($_SERVER['REQUEST_METHOD']==='POST') {
         $mode = (string)($_POST['usi_mode'] ?? 'off');
         anb_setting_save($pdo, 'usi_mode', in_array($mode,['off','test','live'],true) ? $mode : 'off');
-        anb_setting_save($pdo, 'usi_org_code',      strtoupper(trim((string)($_POST['usi_org_code'] ?? ''))));
-        anb_setting_save($pdo, 'usi_credential_id', trim((string)($_POST['usi_credential_id'] ?? '')));
+        // Blank org code / credential ID = leave the stored value alone. Same reasoning
+        // as the password below: a blank box must never silently wipe a working setting.
+        $postedOrg  = strtoupper(trim((string)($_POST['usi_org_code'] ?? '')));
+        $postedCred = trim((string)($_POST['usi_credential_id'] ?? ''));
+        if ($postedOrg  !== '') anb_setting_save($pdo, 'usi_org_code',      $postedOrg);
+        if ($postedCred !== '') anb_setting_save($pdo, 'usi_credential_id', $postedCred);
         // Blank password = leave the stored one alone, so the form can be saved
         // without re-typing it.
         if (trim((string)($_POST['usi_keystore_password'] ?? '')) !== '') {
