@@ -888,6 +888,73 @@ case 'usi_check':
     redirect('?r=student&id='.$sid);
     break;
 
+case 'usi_bulk':
+    require_once __DIR__.'/../lib/usi.php';
+    $cfg      = anb_usi_config($pdo);
+    $progress = anb_usi_bulk_progress($pdo);
+    $waiting  = count(anb_usi_bulk_candidates($pdo));
+    $problems = anb_usi_bulk_problems($pdo);
+    $buckets  = [];
+    foreach ($problems as $p) {
+        $b = anb_usi_bulk_reason_bucket((string)$p['reason']);
+        $buckets[$b] = ($buckets[$b] ?? 0) + 1;
+    }
+    arsort($buckets);
+    render('usi_bulk', compact('cfg','progress','waiting','problems','buckets'), 'Bulk USI verification');
+    break;
+
+case 'usi_bulk_start':
+    require_once __DIR__.'/../lib/usi.php';
+    if ($_SERVER['REQUEST_METHOD']==='POST') {
+        $cfg = anb_usi_config($pdo);
+        if ($cfg['mode'] !== 'live') {
+            $_SESSION['flash'] = 'Switch the USI Registry to Live before running a bulk check.';
+        } else {
+            $u = current_user();
+            anb_usi_bulk_start($pdo, (string)($u['name'] ?? $u['email'] ?? ''));
+        }
+    }
+    redirect('?r=usi_bulk');
+    break;
+
+case 'usi_bulk_stop':
+    require_once __DIR__.'/../lib/usi.php';
+    if ($_SERVER['REQUEST_METHOD']==='POST') anb_usi_bulk_stop($pdo);
+    redirect('?r=usi_bulk');
+    break;
+
+// Called repeatedly by the page while a run is going. Returns JSON, never HTML,
+// so a PHP notice would be visible rather than silently breaking the loop.
+case 'usi_bulk_step':
+    require_once __DIR__.'/../lib/usi.php';
+    header('Content-Type: application/json');
+    $u = current_user();
+    try {
+        $out = anb_usi_bulk_step($pdo, (string)($u['name'] ?? $u['email'] ?? ''), (int)($_GET['n'] ?? 5));
+    } catch (Throwable $e) {
+        http_response_code(500);
+        $out = ['error' => $e->getMessage()];
+    }
+    echo json_encode($out);
+    exit;
+
+case 'usi_bulk_csv':
+    require_once __DIR__.'/../lib/usi.php';
+    $rows = anb_usi_bulk_problems($pdo);
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="usi-problems-'.date('Y-m-d').'.csv"');
+    $out = fopen('php://output', 'w');
+    fputcsv($out, ['Student ID','First name','Family name','Date of birth','USI','Email','Registry status','Problem','Category','Checked at']);
+    foreach ($rows as $r) {
+        fputcsv($out, [
+            $r['student_id'], $r['first_name'], $r['last_name'], $r['date_of_birth'],
+            $r['usi_number'], $r['email'], $r['status'], $r['reason'],
+            anb_usi_bulk_reason_bucket((string)$r['reason']), $r['checked_at'],
+        ]);
+    }
+    fclose($out);
+    exit;
+
 case 'courses':
     $rows = $pdo->query("
         SELECT co.*, (SELECT COUNT(*) FROM plans p WHERE p.course_id=co.id) plans,

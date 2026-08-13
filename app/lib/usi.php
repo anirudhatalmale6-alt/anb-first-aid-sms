@@ -346,3 +346,207 @@ function anb_usi_recent_log(PDO $pdo, int $limit = 25): array {
 function anb_usi_result(bool $ok, bool $verified, string $status, string $message, array $detail): array {
     return ['ok' => $ok, 'verified' => $verified, 'status' => $status, 'message' => $message, 'detail' => $detail];
 }
+
+/* ------------------------------------------------------------ bulk verify */
+
+/**
+ * Verifying eight thousand students one button at a time is not a job anyone
+ * is going to do, so the backlog is worked through in small batches.
+ *
+ * The queue lives in the database rather than in the browser, which means the
+ * run survives a closed laptop, a dropped connection or a PHP timeout - it
+ * picks up exactly where it stopped. Each student is only ever taken once.
+ */
+function anb_usi_bulk_schema(PDO $pdo): void {
+    static $done = false;
+    if ($done) return;
+    $done = true;
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS usi_bulk_queue (
+        student_id INTEGER PRIMARY KEY,
+        state      TEXT NOT NULL DEFAULT 'pending',
+        verified   INTEGER,
+        status     TEXT,
+        reason     TEXT,
+        checked_at TEXT
+    )");
+    $pdo->exec("CREATE INDEX IF NOT EXISTS idx_usi_bulk_state ON usi_bulk_queue(state)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS usi_bulk_run (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        started_at TEXT,
+        finished_at TEXT,
+        started_by TEXT,
+        total      INTEGER DEFAULT 0,
+        state      TEXT DEFAULT 'running'
+    )");
+}
+
+/** The students a bulk run would look at: a USI on file, not yet verified. */
+function anb_usi_bulk_candidates(PDO $pdo): array {
+    return $pdo->query("SELECT id FROM students
+        WHERE TRIM(COALESCE(usi_number,'')) <> '' AND COALESCE(usi_verified,0)=0
+        ORDER BY id")->fetchAll(PDO::FETCH_COLUMN);
+}
+
+/** Queue every candidate and open a run. Any previous queue is cleared. */
+function anb_usi_bulk_start(PDO $pdo, string $by): array {
+    anb_usi_bulk_schema($pdo);
+    $ids = anb_usi_bulk_candidates($pdo);
+
+    $pdo->beginTransaction();
+    try {
+        $pdo->exec("DELETE FROM usi_bulk_queue");
+        $pdo->exec("UPDATE usi_bulk_run SET state='stopped', finished_at='" . date('Y-m-d H:i:s') . "' WHERE state='running'");
+        $ins = $pdo->prepare("INSERT INTO usi_bulk_queue (student_id) VALUES (?)");
+        foreach ($ids as $id) $ins->execute([(int)$id]);
+        $pdo->prepare("INSERT INTO usi_bulk_run (started_at, started_by, total, state) VALUES (?,?,?,'running')")
+            ->execute([date('Y-m-d H:i:s'), $by, count($ids)]);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
+    return anb_usi_bulk_progress($pdo);
+}
+
+function anb_usi_bulk_stop(PDO $pdo): void {
+    anb_usi_bulk_schema($pdo);
+    $pdo->prepare("UPDATE usi_bulk_run SET state='stopped', finished_at=? WHERE state='running'")
+        ->execute([date('Y-m-d H:i:s')]);
+}
+
+/**
+ * Process the next few students. Kept small on purpose: each one is a round
+ * trip to Canberra, and a batch has to finish inside PHP's time limit.
+ *
+ * The lock is not paranoia - two open browser tabs, or a double-clicked
+ * button, would otherwise take the same rows twice and send the registry
+ * duplicate traffic under A&B's credential.
+ */
+function anb_usi_bulk_step(PDO $pdo, string $by, int $batch = 5): array {
+    anb_usi_bulk_schema($pdo);
+
+    $run = $pdo->query("SELECT * FROM usi_bulk_run ORDER BY id DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    if (!$run || $run['state'] !== 'running') {
+        return anb_usi_bulk_progress($pdo) + ['ran' => 0, 'note' => 'No run in progress.'];
+    }
+
+    $lock = ANB_USI_DIR . '/bulk.lock';
+    $fh = @fopen($lock, 'x');       // x = fail if it already exists. Not file_exists() -
+    if ($fh === false) {            // two requests can both pass that and both proceed.
+        if (is_file($lock) && (time() - (int)filemtime($lock)) > 300) {
+            @unlink($lock);          // a batch that died mid-flight must not wedge the run
+            $fh = @fopen($lock, 'x');
+        }
+        if ($fh === false) {
+            return anb_usi_bulk_progress($pdo) + ['ran' => 0, 'note' => 'Another batch is running.'];
+        }
+    }
+    fwrite($fh, (string)getmypid());
+    fclose($fh);
+
+    $ran = [];
+    try {
+        $rows = $pdo->query("SELECT q.student_id, s.first_name, s.last_name, s.usi_number
+            FROM usi_bulk_queue q JOIN students s ON s.id=q.student_id
+            WHERE q.state='pending' ORDER BY q.student_id LIMIT " . max(1, min(25, $batch)))
+            ->fetchAll(PDO::FETCH_ASSOC);
+
+        $mark = $pdo->prepare("UPDATE usi_bulk_queue
+            SET state='done', verified=?, status=?, reason=?, checked_at=? WHERE student_id=?");
+
+        foreach ($rows as $row) {
+            $sid = (int)$row['student_id'];
+            try {
+                $res = anb_usi_verify_student($pdo, $sid, $by);
+                $mark->execute([
+                    $res['verified'] ? 1 : 0,
+                    (string)$res['status'],
+                    $res['verified'] ? '' : (string)$res['message'],
+                    date('Y-m-d H:i:s'),
+                    $sid,
+                ]);
+                $ran[] = [
+                    'id'       => $sid,
+                    'name'     => trim(($row['first_name'] ?? '') . ' ' . ($row['last_name'] ?? '')),
+                    'usi'      => (string)$row['usi_number'],
+                    'verified' => (bool)$res['verified'],
+                    'reason'   => $res['verified'] ? '' : (string)$res['message'],
+                ];
+            } catch (Throwable $e) {
+                // One bad record must never stop the run.
+                $mark->execute([0, '', 'Error: ' . $e->getMessage(), date('Y-m-d H:i:s'), $sid]);
+                $ran[] = [
+                    'id'       => $sid,
+                    'name'     => trim(($row['first_name'] ?? '') . ' ' . ($row['last_name'] ?? '')),
+                    'usi'      => (string)$row['usi_number'],
+                    'verified' => false,
+                    'reason'   => 'Error: ' . $e->getMessage(),
+                ];
+            }
+        }
+    } finally {
+        @unlink($lock);
+    }
+
+    $p = anb_usi_bulk_progress($pdo);
+    if ($p['pending'] === 0 && $p['total'] > 0) {
+        $pdo->prepare("UPDATE usi_bulk_run SET state='done', finished_at=? WHERE state='running'")
+            ->execute([date('Y-m-d H:i:s')]);
+        $p = anb_usi_bulk_progress($pdo);
+    }
+    return $p + ['ran' => count($ran), 'rows' => $ran];
+}
+
+/** @return array{total:int,done:int,pending:int,verified:int,failed:int,state:string,started_at:string,finished_at:string} */
+function anb_usi_bulk_progress(PDO $pdo): array {
+    anb_usi_bulk_schema($pdo);
+    $run = $pdo->query("SELECT * FROM usi_bulk_run ORDER BY id DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC) ?: [];
+    $c = $pdo->query("SELECT
+            COUNT(*) total,
+            SUM(CASE WHEN state='done' THEN 1 ELSE 0 END) done,
+            SUM(CASE WHEN state='pending' THEN 1 ELSE 0 END) pending,
+            SUM(CASE WHEN state='done' AND verified=1 THEN 1 ELSE 0 END) verified,
+            SUM(CASE WHEN state='done' AND verified=0 THEN 1 ELSE 0 END) failed
+        FROM usi_bulk_queue")->fetch(PDO::FETCH_ASSOC);
+    return [
+        'total'       => (int)($c['total'] ?? 0),
+        'done'        => (int)($c['done'] ?? 0),
+        'pending'     => (int)($c['pending'] ?? 0),
+        'verified'    => (int)($c['verified'] ?? 0),
+        'failed'      => (int)($c['failed'] ?? 0),
+        'state'       => (string)($run['state'] ?? 'none'),
+        'started_at'  => (string)($run['started_at'] ?? ''),
+        'finished_at' => (string)($run['finished_at'] ?? ''),
+    ];
+}
+
+/**
+ * The records that did not verify, newest first. This is the whole point of
+ * the exercise - these are the rows that would fail an AVETMISS submission.
+ *
+ * @return array<int,array<string,mixed>>
+ */
+function anb_usi_bulk_problems(PDO $pdo, int $limit = 0): array {
+    anb_usi_bulk_schema($pdo);
+    $sql = "SELECT q.student_id, q.status, q.reason, q.checked_at,
+                   s.first_name, s.last_name, s.date_of_birth, s.usi_number, s.email
+            FROM usi_bulk_queue q JOIN students s ON s.id=q.student_id
+            WHERE q.state='done' AND q.verified=0
+            ORDER BY s.last_name, s.first_name";
+    if ($limit > 0) $sql .= ' LIMIT ' . $limit;
+    return $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/** Group the failures by what actually went wrong, so the list is actionable. */
+function anb_usi_bulk_reason_bucket(string $reason): string {
+    $r = strtolower($reason);
+    if ($r === '')                                   return 'Other';
+    if (str_contains($r, 'does not recognise'))      return 'USI not recognised by the registry';
+    if (str_contains($r, 'deactivated'))             return 'USI deactivated';
+    if (str_contains($r, 'do not match') || str_contains($r, 'does not match')) return 'Details do not match the registry';
+    if (str_contains($r, 'exactly 10 characters') || str_contains($r, 'never contains')) return 'USI is not a valid format';
+    if (str_contains($r, 'date of birth'))           return 'Date of birth problem';
+    if (str_contains($r, 'could not reach') || str_contains($r, 'error:')) return 'Could not reach the registry';
+    return 'Other';
+}

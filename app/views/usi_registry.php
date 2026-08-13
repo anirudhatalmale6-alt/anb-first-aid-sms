@@ -33,10 +33,17 @@ $badge = ['off' => 'secondary', 'test' => 'warning', 'live' => 'success'][$mode]
     <em>Verify with USI Registry</em> button stays hidden on student records until this is set to live.
   </div>
 <?php else: ?>
-  <div class="alert alert-success">
-    <strong>Live.</strong> Verification runs against the real registry using A&amp;B's own machine
-    credential. <?= (int)$pending ?> student<?= $pending === 1 ? '' : 's' ?> currently
-    <?= $pending === 1 ? 'has' : 'have' ?> a USI on file that has not been verified.
+  <div class="alert alert-success d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <span>
+      <strong>Live.</strong> Verification runs against the real registry using A&amp;B's own machine
+      credential. <?= (int)$pending ?> student<?= $pending === 1 ? '' : 's' ?> currently
+      <?= $pending === 1 ? 'has' : 'have' ?> a USI on file that has not been verified.
+    </span>
+    <?php if ($pending > 0): ?>
+      <a class="btn btn-sm btn-anb text-nowrap" href="?r=usi_bulk">
+        <i class="bi bi-lightning-charge"></i> Check them all
+      </a>
+    <?php endif; ?>
   </div>
 <?php endif; ?>
 
