@@ -76,6 +76,7 @@
   <?php if(role_allowed('reminders')): ?><a href="?r=reminders"    class="<?= $r==='reminders'?'active':'' ?>"><i class="bi bi-bell"></i> Renewal Reminders</a><?php endif; ?>
   <?php if(role_allowed('avetmiss')): ?><a href="?r=avetmiss"     class="<?= $r==='avetmiss'?'active':'' ?>"><i class="bi bi-file-earmark-bar-graph"></i> AVETMISS</a><?php endif; ?>
   <?php if(role_allowed('rto_sync')): ?><a href="?r=rto_sync"     class="<?= $r==='rto_sync'?'active':'' ?>"><i class="bi bi-cloud-arrow-up"></i> RTO Data Cloud</a><?php endif; ?>
+  <?php if(role_allowed('usi_registry')): ?><a href="?r=usi_registry" class="<?= $r==='usi_registry'?'active':'' ?>"><i class="bi bi-patch-check"></i> USI Registry</a><?php endif; ?>
   <?php if(role_allowed('emails')): ?><a href="?r=emails"       class="<?= $r==='emails'?'active':'' ?>"><i class="bi bi-envelope-paper"></i> Email Templates</a><?php endif; ?>
   <?php if(role_allowed('management')): ?><a href="?r=management"   class="<?= in_array($r,['management'],true)?'active':'' ?>"><i class="bi bi-folder2-open"></i> Management</a><?php endif; ?>
   <?php if(role_allowed('compliance')): ?><a href="?r=compliance"   class="<?= in_array($r,['compliance'],true)?'active':'' ?>"><i class="bi bi-shield-check"></i> Compliance</a><?php endif; ?>

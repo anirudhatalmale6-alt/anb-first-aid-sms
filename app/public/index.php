@@ -835,6 +835,55 @@ case 'rto_sync_map':
     redirect('?r=rto_sync');
     break;
 
+case 'usi_registry':
+    require_once __DIR__.'/../lib/usi.php';
+    $cfg = anb_usi_config($pdo);
+    $log = anb_usi_recent_log($pdo, 25);
+    $sandbox = $_SESSION['usi_sandbox'] ?? null;
+    unset($_SESSION['usi_sandbox']);
+    $pending = (int)$pdo->query("SELECT COUNT(*) FROM students
+        WHERE usi_number IS NOT NULL AND usi_number<>'' AND COALESCE(usi_verified,0)=0")->fetchColumn();
+    render('usi_registry', compact('cfg','log','sandbox','pending'), 'USI Registry');
+    break;
+
+case 'usi_registry_save':
+    require_once __DIR__.'/../lib/usi.php';
+    if ($_SERVER['REQUEST_METHOD']==='POST') {
+        $mode = (string)($_POST['usi_mode'] ?? 'off');
+        anb_setting_save($pdo, 'usi_mode', in_array($mode,['off','test','live'],true) ? $mode : 'off');
+        anb_setting_save($pdo, 'usi_org_code',      strtoupper(trim((string)($_POST['usi_org_code'] ?? ''))));
+        anb_setting_save($pdo, 'usi_credential_id', trim((string)($_POST['usi_credential_id'] ?? '')));
+        // Blank password = leave the stored one alone, so the form can be saved
+        // without re-typing it.
+        if (trim((string)($_POST['usi_keystore_password'] ?? '')) !== '') {
+            anb_setting_save($pdo, 'usi_keystore_password', (string)$_POST['usi_keystore_password']);
+        }
+        $cfg = anb_usi_config($pdo);
+        $_SESSION['flash'] = $cfg['configured']
+            ? 'USI Registry settings saved. Mode: '.$cfg['mode'].'.'
+            : 'Saved, but not usable yet: '.$cfg['problem'];
+    }
+    redirect('?r=usi_registry');
+    break;
+
+case 'usi_registry_test':
+    require_once __DIR__.'/../lib/usi.php';
+    if ($_SERVER['REQUEST_METHOD']==='POST') {
+        $u = current_user();
+        $_SESSION['usi_sandbox'] = anb_usi_verify_sandbox($pdo, (string)($u['name'] ?? ''));
+    }
+    redirect('?r=usi_registry');
+    break;
+
+case 'usi_check':
+    require_once __DIR__.'/../lib/usi.php';
+    $sid = (int)($_POST['student_id'] ?? 0);
+    $u = current_user();
+    $res = anb_usi_verify_student($pdo, $sid, (string)($u['name'] ?? $u['email'] ?? ''));
+    $_SESSION['flash'] = ($res['verified'] ? 'USI verified: ' : 'USI not verified. ').$res['message'];
+    redirect('?r=student&id='.$sid);
+    break;
+
 case 'courses':
     $rows = $pdo->query("
         SELECT co.*, (SELECT COUNT(*) FROM plans p WHERE p.course_id=co.id) plans,

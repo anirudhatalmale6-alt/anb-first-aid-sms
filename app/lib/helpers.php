@@ -29,9 +29,11 @@ function role_routes(string $role): array {
       'email_test','cert_email','surveys','survey_view','avetmiss','avetmiss_export','avetmiss_preview',
       'student_send_access','student_portal','student_portal_batch','review_links','review_links_save',
       // RTO Data Cloud: office can view/retry a push, but only admin can change the off/dry/live mode
-      'rto_sync','rto_sync_push','rto_sync_map'];
+      'rto_sync','rto_sync_push','rto_sync_map',
+      // USI Registry: office can run a check and see the log, but not change the credential
+      'usi_registry','usi_registry_test','usi_check'];
     $trainer = ['dashboard','trainer','students','student','schedules','pipeline','class_send_access','obs_list','obs_mark','obs_save',
-      'form_subs','form_view','content','quiz_edit','signoff','generate','cert','usi_verify',
+      'form_subs','form_view','content','quiz_edit','signoff','generate','cert','usi_verify','usi_check',
       'my_trainer','my_trainer_save','my_trainer_qual','my_trainer_declare','my_trainer_insurance',
       'trainer_cert_download','trainer_ins_download'];
     $compliance = ['dashboard','compliance','comp_save','comp_download','comp_archive','ci_save','comp_equip_save',

@@ -50,12 +50,31 @@
         <?php if (empty($s['usi_number'])): ?>
           <div class="small text-muted">No USI on file yet - add the student's USI first, then verify.</div>
         <?php else: ?>
-          <div class="small mb-2">Check these details in your USI Organisation Portal (Verify USI), then tick below:</div>
           <div class="small bg-light border rounded p-2 mb-2">
             <div><span class="text-muted">USI:</span> <strong><?= e($s['usi_number']) ?></strong></div>
             <div><span class="text-muted">Name:</span> <strong><?= e(trim($s['first_name'].' '.$s['last_name'])) ?></strong></div>
             <div><span class="text-muted">DOB:</span> <strong><?= e($s['date_of_birth'] ?: '—') ?></strong></div>
           </div>
+          <?php
+            // The one-click check only appears when the registry connection is
+            // live - in test mode the only students that exist are the
+            // government's fake ones.
+            require_once __DIR__ . '/../lib/usi.php';
+            $usiCfg = anb_usi_config(db());
+            $usiFormat = anb_usi_format_problem((string)$s['usi_number']);
+          ?>
+          <?php if ($usiFormat !== ''): ?>
+            <div class="alert alert-warning py-2 small mb-2"><i class="bi bi-exclamation-triangle"></i> <?= e($usiFormat) ?></div>
+          <?php endif; ?>
+          <?php if ($usiCfg['mode'] === 'live' && $usiCfg['configured'] && $usiFormat === '' && !empty($s['date_of_birth'])): ?>
+            <form method="post" action="?r=usi_check" class="mb-2">
+              <input type="hidden" name="student_id" value="<?= (int)$s['id'] ?>">
+              <button class="btn btn-anb btn-sm"><i class="bi bi-shield-check"></i> Verify with USI Registry</button>
+            </form>
+            <div class="small text-muted mb-2">Or check it by hand in the portal and tick below.</div>
+          <?php else: ?>
+            <div class="small mb-2">Check these details in your USI Organisation Portal (Verify USI), then tick below:</div>
+          <?php endif; ?>
           <a href="https://www.usi.gov.au" target="_blank" rel="noopener" class="btn btn-sm btn-outline-danger mb-2"><i class="bi bi-box-arrow-up-right"></i> Open USI portal</a>
           <form method="post" action="?r=usi_verify">
             <input type="hidden" name="student_id" value="<?= (int)$s['id'] ?>">
