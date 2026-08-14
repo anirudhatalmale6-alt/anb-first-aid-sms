@@ -34,6 +34,60 @@
           <span class="text-muted"><?= e($k) ?></span><span class="fw-semibold text-end"><?= e($v ?: '—') ?></span>
         </div>
       <?php endforeach; ?>
+
+      <button class="btn btn-sm btn-outline-secondary mt-3" type="button"
+              data-bs-toggle="collapse" data-bs-target="#editDetails">
+        <i class="bi bi-pencil"></i> Correct these details
+      </button>
+
+      <div class="collapse mt-3" id="editDetails">
+        <form method="post" action="?r=student_save">
+          <input type="hidden" name="id" value="<?= (int)$s['id'] ?>">
+          <p class="small text-muted">
+            The name and date of birth must match the USI Registry exactly - middle names,
+            hyphens and married names all count. A student with one legal name has it in the
+            family name box with the first name left <strong>empty</strong>.
+          </p>
+          <div class="row g-2">
+            <div class="col-3">
+              <label class="form-label small fw-bold">Title</label>
+              <input class="form-control form-control-sm" name="salutation" value="<?= e($s['salutation']) ?>">
+            </div>
+            <div class="col-9">
+              <label class="form-label small fw-bold">First name</label>
+              <input class="form-control form-control-sm" name="first_name" value="<?= e($s['first_name']) ?>">
+            </div>
+            <div class="col-6">
+              <label class="form-label small fw-bold">Middle name</label>
+              <input class="form-control form-control-sm" name="middle_name" value="<?= e($s['middle_name']) ?>">
+            </div>
+            <div class="col-6">
+              <label class="form-label small fw-bold">Family name</label>
+              <input class="form-control form-control-sm" name="last_name" value="<?= e($s['last_name']) ?>">
+            </div>
+            <div class="col-6">
+              <label class="form-label small fw-bold">Date of birth</label>
+              <input class="form-control form-control-sm" name="date_of_birth"
+                     value="<?= e($s['date_of_birth']) ?>" placeholder="yyyy-mm-dd">
+            </div>
+            <div class="col-6">
+              <label class="form-label small fw-bold">USI</label>
+              <input class="form-control form-control-sm text-uppercase" name="usi_number"
+                     value="<?= e($s['usi_number']) ?>" maxlength="10">
+            </div>
+            <div class="col-7">
+              <label class="form-label small fw-bold">Email</label>
+              <input class="form-control form-control-sm" name="email" value="<?= e($s['email']) ?>">
+            </div>
+            <div class="col-5">
+              <label class="form-label small fw-bold">Mobile</label>
+              <input class="form-control form-control-sm" name="mobile_phone" value="<?= e($s['mobile_phone']) ?>">
+            </div>
+          </div>
+          <button class="btn btn-anb btn-sm mt-3"><i class="bi bi-save"></i> Save details</button>
+          <span class="small text-muted ms-2">Changing a name or USI clears the verified tick.</span>
+        </form>
+      </div>
     </div>
 
     <div class="card p-3 mb-3" style="border-left:4px solid <?= !empty($s['usi_verified'])?'#2e7d32':'#E53935' ?>;">

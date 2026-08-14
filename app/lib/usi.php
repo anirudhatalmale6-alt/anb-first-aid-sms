@@ -510,13 +510,16 @@ function anb_usi_bulk_step(PDO $pdo, string $by, int $batch = 5): array {
 function anb_usi_bulk_progress(PDO $pdo): array {
     anb_usi_bulk_schema($pdo);
     $run = $pdo->query("SELECT * FROM usi_bulk_run ORDER BY id DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC) ?: [];
+    // verified/failed are read from the student's CURRENT tick, not the verdict
+    // the run recorded. Someone who was fixed after the run should show as
+    // verified here, otherwise the page keeps reporting yesterday's problem.
     $c = $pdo->query("SELECT
             COUNT(*) total,
-            SUM(CASE WHEN state='done' THEN 1 ELSE 0 END) done,
-            SUM(CASE WHEN state='pending' THEN 1 ELSE 0 END) pending,
-            SUM(CASE WHEN state='done' AND verified=1 THEN 1 ELSE 0 END) verified,
-            SUM(CASE WHEN state='done' AND verified=0 THEN 1 ELSE 0 END) failed
-        FROM usi_bulk_queue")->fetch(PDO::FETCH_ASSOC);
+            SUM(CASE WHEN q.state='done' THEN 1 ELSE 0 END) done,
+            SUM(CASE WHEN q.state='pending' THEN 1 ELSE 0 END) pending,
+            SUM(CASE WHEN q.state='done' AND COALESCE(s.usi_verified,0)=1 THEN 1 ELSE 0 END) verified,
+            SUM(CASE WHEN q.state='done' AND COALESCE(s.usi_verified,0)=0 THEN 1 ELSE 0 END) failed
+        FROM usi_bulk_queue q JOIN students s ON s.id=q.student_id")->fetch(PDO::FETCH_ASSOC);
     return [
         'total'       => (int)($c['total'] ?? 0),
         'done'        => (int)($c['done'] ?? 0),
@@ -533,6 +536,11 @@ function anb_usi_bulk_progress(PDO $pdo): array {
  * The records that did not verify, newest first. This is the whole point of
  * the exercise - these are the rows that would fail an AVETMISS submission.
  *
+ * The queue row is a record of what happened during the run, so it keeps
+ * saying "failed" forever. The list has to be what is wrong *now*, or it goes
+ * on showing a student the day after somebody fixed them - hence the check
+ * against the student's current tick rather than the run's verdict alone.
+ *
  * @return array<int,array<string,mixed>>
  */
 function anb_usi_bulk_problems(PDO $pdo, int $limit = 0): array {
@@ -540,7 +548,7 @@ function anb_usi_bulk_problems(PDO $pdo, int $limit = 0): array {
     $sql = "SELECT q.student_id, q.status, q.reason, q.checked_at,
                    s.first_name, s.last_name, s.date_of_birth, s.usi_number, s.email
             FROM usi_bulk_queue q JOIN students s ON s.id=q.student_id
-            WHERE q.state='done' AND q.verified=0
+            WHERE q.state='done' AND q.verified=0 AND COALESCE(s.usi_verified,0)=0
             ORDER BY s.last_name, s.first_name";
     if ($limit > 0) $sql .= ' LIMIT ' . $limit;
     return $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
@@ -828,10 +836,15 @@ function anb_usi_repair_rows(PDO $pdo, string $state = ''): array {
  * so the tick and the audit-log entry are written the same way a staff member
  * pressing the button would write them.
  */
-function anb_usi_repair_apply(PDO $pdo, string $by): array {
+function anb_usi_repair_apply(PDO $pdo, string $by, int $limit = 0): array {
     anb_usi_repair_schema($pdo);
-    $rows = $pdo->query("SELECT * FROM usi_name_repair
-        WHERE state='matched' AND applied_at IS NULL")->fetchAll(PDO::FETCH_ASSOC);
+    // Saving re-verifies each student, which is a second or so of network each.
+    // A limit keeps one request comfortably inside the host's execution cap;
+    // the caller just calls again, because 'applied_at IS NULL' is the resume
+    // point and re-applying a row is harmless anyway.
+    $sql = "SELECT * FROM usi_name_repair WHERE state='matched' AND applied_at IS NULL ORDER BY student_id";
+    if ($limit > 0) $sql .= " LIMIT " . $limit;
+    $rows = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
 
     $upd  = $pdo->prepare("UPDATE students SET first_name=?, last_name=? WHERE id=?");
     $done = $pdo->prepare("UPDATE usi_name_repair SET applied_at=? WHERE student_id=?");
@@ -845,9 +858,12 @@ function anb_usi_repair_apply(PDO $pdo, string $by): array {
         $last  = (string)$r['new_single'] !== '' ? (string)$r['new_single'] : (string)$r['new_last'];
         try {
             $upd->execute([$first, $last, $sid]);
+            $res = anb_usi_verify_student($pdo, $sid, $by);
+            // Marked applied only once the verify has actually come back, so a
+            // request that dies mid-run leaves the record retryable rather than
+            // renamed-but-unverified with nothing left to pick it up.
             $done->execute([date('Y-m-d H:i:s'), $sid]);
             $saved++;
-            $res = anb_usi_verify_student($pdo, $sid, $by);
             if ($res['verified']) $verified++;
             else $failed[] = $sid;
         } catch (Throwable $e) {

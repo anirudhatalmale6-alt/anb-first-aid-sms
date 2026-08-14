@@ -96,9 +96,18 @@ $reads = function (array $r): string {
       <h6 class="fw-bold mb-0 text-success">
         <i class="bi bi-check2-circle"></i> <?= count($matched) ?> the registry confirmed
       </h6>
+      <?php
+        // Each save re-checks the student with the registry, so a batch is kept
+        // small enough to finish inside one request. Press again for the rest.
+        $chunk = min(25, count($matched));
+      ?>
       <form method="post" action="?r=usi_repair_apply"
-            onsubmit="return confirm('Save these <?= count($matched) ?> names to the student records? Only these ones - nothing else is touched.')">
-        <button class="btn btn-anb btn-sm"><i class="bi bi-save"></i> Save these <?= count($matched) ?> changes</button>
+            onsubmit="return confirm('Save <?= $chunk ?> of these <?= count($matched) ?> names to the student records? Only these ones - nothing else is touched.')">
+        <input type="hidden" name="limit" value="25">
+        <button class="btn btn-anb btn-sm">
+          <i class="bi bi-save"></i>
+          Save <?= count($matched) > 25 ? 'the next 25' : 'these '.count($matched).' changes' ?>
+        </button>
       </form>
     </div>
     <p class="small text-muted">

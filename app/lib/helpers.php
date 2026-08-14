@@ -22,7 +22,7 @@ function redirect(string $to): void { header("Location: $to"); exit; }
 
 /** Role-based access. Admin sees everything; other roles are limited to their area. */
 function role_routes(string $role): array {
-    $office = ['dashboard','students','student','enrolments','enrol_new','enrol_create','enrol_move','enrol_move_save',
+    $office = ['dashboard','students','student','student_save','enrolments','enrol_new','enrol_create','enrol_move','enrol_move_save',
       'schedules','schedule_save','schedule_duplicate','schedule_delete','pipeline','class_send_access','generate','signoff','cert','usi_verify',
       'group_bookings','group_booking_view','group_booking_save','locations','location_save','location_delete',
       'courses','certificates','reminders','emails','email_save','email_delete','email_settings','email_settings_save',

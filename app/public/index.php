@@ -553,6 +553,45 @@ case 'student':
     render('student', compact('s','enrolments','certs'), $s['first_name'].' '.$s['last_name']);
     break;
 
+/**
+ * Correct the name, date of birth or USI on a student record.
+ *
+ * Until this existed the only way to change a name was the student's own
+ * portal, so staff had no way to act on anything the registry rejected.
+ */
+case 'student_save':
+    $id = (int)($_POST['id'] ?? 0);
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !$id) redirect('?r=students');
+    $cur = $pdo->prepare("SELECT usi_number, first_name, last_name FROM students WHERE id=?");
+    $cur->execute([$id]); $cur = $cur->fetch(PDO::FETCH_ASSOC);
+    if (!$cur) { http_response_code(404); echo 'Not found'; break; }
+
+    $sets = []; $vals = [];
+    foreach (['salutation','first_name','middle_name','last_name','date_of_birth',
+              'email','mobile_phone','usi_number'] as $f) {
+        if (!isset($_POST[$f])) continue;
+        $v = trim((string)$_POST[$f]);
+        if ($f === 'usi_number') $v = strtoupper($v);
+        $sets[] = "$f=?"; $vals[] = $v;
+    }
+    // A changed USI has not been checked against anything, so the tick must go.
+    // Changing the name does the same - the old tick was for the old spelling.
+    $newUsi  = strtoupper(trim((string)($_POST['usi_number'] ?? $cur['usi_number'])));
+    $renamed = trim((string)($_POST['first_name'] ?? '')) !== (string)$cur['first_name']
+            || trim((string)($_POST['last_name']  ?? '')) !== (string)$cur['last_name'];
+    if ($newUsi !== strtoupper((string)$cur['usi_number']) || $renamed) {
+        $sets[] = "usi_verified=0"; $sets[] = "usi_verified_date=NULL"; $sets[] = "usi_verified_method=NULL";
+    }
+    if ($sets) {
+        $vals[] = $id;
+        $pdo->prepare("UPDATE students SET ".implode(',', $sets)." WHERE id=?")->execute($vals);
+    }
+    $_SESSION['flash'] = ($newUsi !== strtoupper((string)$cur['usi_number']) || $renamed)
+        ? 'Saved. The USI needs verifying again now the details have changed.'
+        : 'Saved.';
+    redirect('?r=student&id='.$id);
+    break;
+
 case 'enrolments':
     $rows = $pdo->query("
         SELECT e.*, s.first_name, s.last_name, co.code course_code, co.title course_title,
@@ -1007,7 +1046,7 @@ case 'usi_repair_apply':
         redirect('?r=usi_repair');
     }
     if ($_SERVER['REQUEST_METHOD']==='POST') {
-        $res = anb_usi_repair_apply($pdo, (string)($u['name'] ?? $u['email'] ?? ''));
+        $res = anb_usi_repair_apply($pdo, (string)($u['name'] ?? $u['email'] ?? ''), (int)($_POST['limit'] ?? 25));
         $_SESSION['flash'] = 'Saved ' . $res['saved'] . ' name' . ($res['saved']===1?'':'s')
             . ', ' . $res['verified'] . ' now verified against the registry'
             . ($res['failed'] ? ', ' . $res['failed'] . ' need another look' : '') . '.';
