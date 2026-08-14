@@ -1720,6 +1720,13 @@ case 'reminders':
     $due = rem_due($pdo);
     $lapsed = rem_lapsed_count($pdo);
     $preview = $_SESSION['rem_preview'] ?? null; unset($_SESSION['rem_preview']);
+    // The lapsed side: counts per band, the chosen band's list, and whether
+    // the wording exists yet. Nothing here sends on its own.
+    $lapBands   = rem_lapsed_bands($pdo);
+    $lapBand    = isset($_GET['band']) && isset(REM_LAPSED_BANDS[$_GET['band']]) ? (string)$_GET['band'] : 'm6';
+    $lapRows    = rem_lapsed_rows($pdo, $lapBand, 15);
+    $lapTpl     = rem_lapsed_template($pdo);
+    $lapPreview = $_SESSION['rem_lapsed_preview'] ?? null; unset($_SESSION['rem_lapsed_preview']);
     // Only the next six weeks - the old page listed all 11,000 certificates,
     // oldest expiry first, so the top of it was people years out of date.
     $rows = $pdo->query("
@@ -1731,7 +1738,51 @@ case 'reminders':
           AND date(c.expiry_date) >= date('now')
           AND date(c.expiry_date) <= date('now','+42 day')
         ORDER BY date(c.expiry_date) ASC")->fetchAll();
-    render('reminders', compact('rows','cfg','due','lapsed','preview'), 'Renewal Reminders');
+    render('reminders', compact('rows','cfg','due','lapsed','preview',
+                                'lapBands','lapBand','lapRows','lapTpl','lapPreview'), 'Renewal Reminders');
+    break;
+
+/** Create the "Certificate Expired" wording, pre-filled for her to edit. */
+case 'reminders_lapsed_template':
+    require_once __DIR__.'/../lib/reminders.php';
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && !rem_lapsed_template($pdo)) {
+        $d = rem_lapsed_default_template();
+        $pdo->prepare("INSERT INTO email_templates (name,subject,body,updated_at) VALUES (?,?,?,datetime('now'))")
+            ->execute([REM_LAPSED_TEMPLATE, $d['subject'], $d['body']]);
+        $_SESSION['flash'] = 'Created the "'.REM_LAPSED_TEMPLATE.'" template. Please read it over and change the wording to suit before sending anything.';
+    }
+    redirect('?r=emails');
+    break;
+
+/** Dry run over a band. Sends nothing, same code path as the real send. */
+case 'reminders_lapsed_preview':
+    require_once __DIR__.'/../lib/reminders.php';
+    $band = (string)($_POST['band'] ?? 'm6');
+    $cap  = (int)($_POST['cap'] ?? 25);
+    $_SESSION['rem_lapsed_preview'] = rem_lapsed_run($pdo, $band, $cap, true) + ['band'=>$band];
+    redirect('?r=reminders&band='.urlencode($band));
+    break;
+
+/**
+ * The real batch. Admin only, capped, and one press = one batch - there is
+ * deliberately no schedule behind this. 971 students who let a certificate
+ * lapse is a marketing decision, not something a cron job should make.
+ */
+case 'reminders_lapsed_send':
+    require_once __DIR__.'/../lib/reminders.php';
+    $u = current_user();
+    $band = (string)($_POST['band'] ?? 'm6');
+    if (($u['role'] ?? 'admin') !== 'admin') {
+        $_SESSION['flash'] = 'Only an administrator can send to lapsed students.';
+        $_SESSION['flash_error'] = 1;
+    } elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $res = rem_lapsed_run($pdo, $band, (int)($_POST['cap'] ?? 25), false);
+        $_SESSION['rem_lapsed_preview'] = $res + ['band'=>$band, 'was_real'=>true];
+        $_SESSION['flash'] = $res['why'] !== '' ? $res['why']
+            : $res['sent'].' sent'.($res['failed'] ? ', '.$res['failed'].' failed' : '').'.';
+        if ($res['why'] !== '' || $res['failed']) $_SESSION['flash_error'] = 1;
+    }
+    redirect('?r=reminders&band='.urlencode($band));
     break;
 
 /** Dry run - shows exactly what a real run would do, sends nothing. */

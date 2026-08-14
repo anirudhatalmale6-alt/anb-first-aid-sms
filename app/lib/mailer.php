@@ -210,25 +210,34 @@ function anb_mime_name(string $s): string {
 function anb_body_html(string $text): string {
     $safe = htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
 
-    // Trailing punctuation is part of the sentence, not the address.
+    // One pass, not three. Anything matched here is replaced with an anchor, and
+    // a second pass over the result would happily match the address again inside
+    // the href it just wrote - which is how "www.anbfirstaidtraining.com.au"
+    // inside an https:// link would end up nested in a second broken anchor.
+    // The alternatives are ordered: full address, then email (so the domain half
+    // of admin@... is never taken for a host), then a bare www. host.
     $safe = preg_replace_callback(
-        '#\bhttps?://[^\s<>"]+#i',
+        '#(?P<url>\bhttps?://[^\s<>"]+)'
+        . '|(?P<mail>\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b)'
+        . '|(?P<www>\bwww\.[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+(?:/[^\s<>"]*)?)#i',
         static function (array $m): string {
-            $url = $m[0];
-            $tail = '';
-            while ($url !== '' && strpos('.,;:!?)', substr($url, -1)) !== false) {
-                $tail = substr($url, -1) . $tail;
-                $url  = substr($url, 0, -1);
+            if (!empty($m['mail'])) {
+                return '<a href="mailto:' . $m['mail'] . '">' . $m['mail'] . '</a>';
             }
-            return '<a href="' . $url . '" target="_blank" rel="noopener">' . $url . '</a>' . $tail;
+            // Trailing punctuation is part of the sentence, not the address.
+            $shown = $m[0];
+            $tail  = '';
+            while ($shown !== '' && strpos('.,;:!?)', substr($shown, -1)) !== false) {
+                $tail  = substr($shown, -1) . $tail;
+                $shown = substr($shown, 0, -1);
+            }
+            if ($shown === '') return $tail;
+            // She writes the address the way it is printed on her paperwork -
+            // "www.anbfirstaidtraining.com.au", no scheme. A browser needs one
+            // or it treats the whole thing as a relative path and 404s.
+            $href = empty($m['url']) ? 'https://' . $shown : $shown;
+            return '<a href="' . $href . '" target="_blank" rel="noopener">' . $shown . '</a>' . $tail;
         },
-        $safe
-    ) ?? $safe;
-
-    // Bare email addresses are worth making clickable too.
-    $safe = preg_replace(
-        '#(?<!["\'>])\b([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\b#',
-        '<a href="mailto:$1">$1</a>',
         $safe
     ) ?? $safe;
 

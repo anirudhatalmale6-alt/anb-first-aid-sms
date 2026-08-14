@@ -104,6 +104,178 @@ function rem_lapsed_count(PDO $pdo): int {
           AND TRIM(COALESCE(s.email,'')) <> ''")->fetchColumn();
 }
 
+/* ------------------------------------------------------------------ *
+ * Certificates that have already lapsed.
+ *
+ * A separate engine on purpose. The counting is the part that matters:
+ * there are ~2,772 lapsed certificates but only ~972 students who have
+ * nothing current, because most of the rest came back and re-certified.
+ * Emailing all 2,772 would tell 1,800 currently-certified students that
+ * they are out of date.
+ *
+ * So: one row per student, their most recent certificate, and only where
+ * that most recent one has expired.
+ * ------------------------------------------------------------------ */
+
+const REM_LAPSED_TEMPLATE = 'Certificate Expired';
+
+/** How long ago their last certificate lapsed. Colder bands are worth
+ *  treating differently - a two-year-old lapse is a different letter. */
+const REM_LAPSED_BANDS = [
+    'm6'  => ['label' => 'Lapsed within 6 months',  'min' => 0,   'max' => 180],
+    'm12' => ['label' => 'Lapsed 6 to 12 months ago','min' => 181, 'max' => 365],
+    'y2'  => ['label' => 'Lapsed 1 to 2 years ago', 'min' => 366, 'max' => 730],
+    'old' => ['label' => 'Lapsed over 2 years ago', 'min' => 731, 'max' => 100000],
+];
+
+function rem_lapsed_schema(PDO $pdo): void {
+    static $done = false;
+    if ($done) return;
+    $done = true;
+    rem_schema($pdo);
+    $cols = $pdo->query("PRAGMA table_info(certificates)")->fetchAll(PDO::FETCH_COLUMN, 1);
+    if (!in_array('lapsed_sent', $cols, true)) {
+        $pdo->exec("ALTER TABLE certificates ADD COLUMN lapsed_sent TEXT");
+    }
+    // "their newest certificate" is a correlated lookup over ~11,000 rows.
+    // Without this the page is a full scan per student.
+    $pdo->exec("CREATE INDEX IF NOT EXISTS idx_cert_student_expiry
+                ON certificates(student_id, expiry_date)");
+}
+
+/**
+ * The shared body of the lapsed query: one row per student, being the
+ * newest certificate they hold, where that newest one is in the past.
+ */
+function rem_lapsed_sql(): string {
+    return "
+        FROM certificates c
+        JOIN students s      ON s.id = c.student_id
+        LEFT JOIN enrolments e ON e.id = c.enrolment_id
+        LEFT JOIN courses co ON co.id = e.course_id
+        WHERE c.expiry_date IS NOT NULL
+          AND TRIM(COALESCE(s.email,'')) <> ''
+          AND s.email LIKE '%@%'
+          AND date(c.expiry_date) < date('now')
+          AND c.id = (SELECT c2.id FROM certificates c2
+                      WHERE c2.student_id = c.student_id AND c2.expiry_date IS NOT NULL
+                      ORDER BY date(c2.expiry_date) DESC, c2.id DESC LIMIT 1)";
+}
+
+/** @return array<string,int> band key => number of students */
+function rem_lapsed_bands(PDO $pdo): array {
+    rem_lapsed_schema($pdo);
+    // One pass, bucketed in SQL - running the whole correlated query once per
+    // band made the page take four times as long for the same answer.
+    $out = array_fill_keys(array_keys(REM_LAPSED_BANDS), 0);
+    $rows = $pdo->query("
+        SELECT CASE WHEN d <= 180 THEN 'm6'
+                    WHEN d <= 365 THEN 'm12'
+                    WHEN d <= 730 THEN 'y2'
+                    ELSE 'old' END band, COUNT(*) n
+        FROM (
+            SELECT CAST(julianday(date('now')) - julianday(date(c.expiry_date)) AS INTEGER) d
+            " . rem_lapsed_sql() . " AND c.lapsed_sent IS NULL
+        )
+        GROUP BY band")->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($rows as $r) {
+        if (isset($out[$r['band']])) $out[$r['band']] = (int)$r['n'];
+    }
+    return $out;
+}
+
+/** @return array<int,array<string,mixed>> */
+function rem_lapsed_rows(PDO $pdo, string $band, int $limit = 0): array {
+    rem_lapsed_schema($pdo);
+    $b = REM_LAPSED_BANDS[$band] ?? null;
+    if (!$b) return [];
+    $sql = "SELECT c.id, c.certificate_number, c.expiry_date, c.lapsed_sent,
+                   s.id student_id, s.first_name, s.last_name, s.email,
+                   COALESCE(co.title,'') course_title, COALESCE(co.code, c.type, '') course_code,
+                   CAST(julianday(date('now')) - julianday(date(c.expiry_date)) AS INTEGER) days_ago
+            " . rem_lapsed_sql() . "
+              AND CAST(julianday(date('now')) - julianday(date(c.expiry_date)) AS INTEGER)
+                  BETWEEN {$b['min']} AND {$b['max']}
+              AND c.lapsed_sent IS NULL
+            ORDER BY date(c.expiry_date) DESC";
+    if ($limit > 0) $sql .= " LIMIT " . (int)$limit;
+    return $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/** The wording offered if the template does not exist yet. Hers to edit. */
+function rem_lapsed_default_template(): array {
+    return [
+        'subject' => 'Your first aid certificate has expired',
+        'body'    => "Hi {first_name},\n\n"
+            . "Our records show your {course} certificate expired on {expiry_date}, "
+            . "so you are no longer currently certified.\n\n"
+            . "Getting back up to date is straightforward - the refresher is a short course "
+            . "and you can book online here: {booking_link}\n\n"
+            . "If you have already renewed elsewhere, please ignore this email.\n\n"
+            . "Kind regards,\n\n"
+            . "A&B First Aid Training Pty Ltd\nRTO 46055\nM: 0423 427 765\n"
+            . "www.anbfirstaidtraining.com.au",
+    ];
+}
+
+function rem_lapsed_template(PDO $pdo): ?array {
+    $q = $pdo->prepare("SELECT * FROM email_templates WHERE name=? LIMIT 1");
+    $q->execute([REM_LAPSED_TEMPLATE]);
+    return $q->fetch(PDO::FETCH_ASSOC) ?: null;
+}
+
+/** @return array{0:bool,1:string} */
+function rem_lapsed_send_one(PDO $pdo, array $row, bool $dryRun = true): array {
+    rem_lapsed_schema($pdo);
+    $tpl = rem_lapsed_template($pdo);
+    if (!$tpl) return [false, 'The "' . REM_LAPSED_TEMPLATE . '" template does not exist yet.'];
+
+    $name = trim((string)$row['first_name'] . ' ' . (string)$row['last_name']);
+    $vars = [
+        'first_name'  => (string)$row['first_name'],
+        'last_name'   => (string)$row['last_name'],
+        'course'      => trim(trim((string)$row['course_code'] . ' - ' . (string)$row['course_title']), ' -'),
+        'expiry_date' => date('d-m-Y', strtotime((string)$row['expiry_date'])),
+        'booking_url'  => rem_config($pdo)['booking_url'],
+        'booking_link' => rem_config($pdo)['booking_url'],
+    ];
+    $subject = anb_merge((string)$tpl['subject'], $vars);
+    $bodyTxt = anb_merge((string)$tpl['body'], $vars);
+
+    if ($dryRun) return [true, 'Would email ' . $name . ' <' . $row['email'] . '> - ' . $subject];
+
+    [$ok, $err] = anb_send_mail($pdo, (string)$row['email'], $subject, anb_body_html($bodyTxt));
+    if ($ok) {
+        $pdo->prepare("UPDATE certificates SET lapsed_sent=? WHERE id=?")
+            ->execute([date('Y-m-d H:i:s'), (int)$row['id']]);
+        return [true, 'Emailed ' . $name];
+    }
+    return [false, 'Failed for ' . $name . ': ' . $err];
+}
+
+/**
+ * One batch. Never automatic - there is no schedule behind this, it only
+ * runs when somebody presses the button, and only as far as the cap.
+ *
+ * @return array{sent:int,failed:int,considered:int,lines:array<int,string>,why:string}
+ */
+function rem_lapsed_run(PDO $pdo, string $band, int $cap, bool $dryRun = true): array {
+    rem_lapsed_schema($pdo);
+    $cap = max(1, min(200, $cap));
+    if (!rem_lapsed_template($pdo)) {
+        return ['sent'=>0,'failed'=>0,'considered'=>0,'lines'=>[],
+                'why'=>'Create the "' . REM_LAPSED_TEMPLATE . '" template first.'];
+    }
+    $rows = rem_lapsed_rows($pdo, $band, $cap);
+    $sent = 0; $failed = 0; $lines = [];
+    foreach ($rows as $r) {
+        [$ok, $msg] = rem_lapsed_send_one($pdo, $r, $dryRun);
+        $lines[] = ($ok ? '' : 'FAILED: ') . $msg;
+        if ($ok) $sent++; else $failed++;
+    }
+    return ['sent'=>$sent,'failed'=>$failed,'considered'=>count($rows),'lines'=>$lines,'why'=>''];
+}
+
 /**
  * Send one reminder. Returns [ok, message].
  *

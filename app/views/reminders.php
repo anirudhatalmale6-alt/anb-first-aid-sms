@@ -67,9 +67,9 @@ $isErr = !empty($_SESSION['flash_error']); unset($_SESSION['flash_error']);
 
       <?php if ($lapsed > 0): ?>
         <div class="alert alert-light border small mb-0">
-          <strong><?= number_format($lapsed) ?></strong> students have a certificate that has
-          <em>already</em> lapsed. They are deliberately left out of this - re-engaging them is a
-          different message and your decision, not something the system should do on its own.
+          <strong><?= number_format($lapsed) ?></strong> certificates have <em>already</em> lapsed.
+          They are deliberately left out of the automatic run - "your certificate expires soon" is
+          not true once it has gone. See <a href="#lapsed">Already expired</a> below.
         </div>
       <?php endif; ?>
     </div>
@@ -169,6 +169,124 @@ $isErr = !empty($_SESSION['flash_error']); unset($_SESSION['flash_error']);
         </td>
       </tr>
     <?php endforeach; ?>
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<?php
+$lapTotal  = array_sum($lapBands);
+$bandLabel = REM_LAPSED_BANDS[$lapBand]['label'] ?? '';
+?>
+<div class="card p-3 mt-3" id="lapsed">
+  <h6 class="fw-bold mb-2">Already expired - winning them back</h6>
+  <p class="small text-muted mb-3">
+    <?= number_format($lapsed) ?> certificates have expired, but that is not the number of people to
+    contact - most of those students came back and re-certified since. Counting one row per student,
+    and only where their <em>most recent</em> certificate has expired, leaves
+    <strong><?= number_format($lapTotal) ?></strong> who are genuinely no longer certified.
+    This never runs on its own: one press sends one batch, up to the cap.
+  </p>
+
+  <div class="d-flex flex-wrap gap-2 mb-3">
+    <?php foreach (REM_LAPSED_BANDS as $k => $b): ?>
+      <a href="?r=reminders&band=<?= e($k) ?>#lapsed"
+         class="btn btn-sm <?= $lapBand === $k ? 'btn-anb' : 'btn-outline-secondary' ?>">
+        <?= e($b['label']) ?>
+        <span class="badge text-bg-light text-dark ms-1"><?= number_format($lapBands[$k]) ?></span>
+      </a>
+    <?php endforeach; ?>
+  </div>
+
+  <?php if (!$lapTpl): ?>
+    <div class="alert alert-warning small">
+      <strong>The wording does not exist yet.</strong>
+      A lapsed student needs a different email from the renewal reminder - that one says the
+      certificate "expires on", which reads badly to somebody whose certificate went a year ago.
+      <form method="post" action="?r=reminders_lapsed_template" class="mt-2">
+        <button class="btn btn-sm btn-anb">
+          <i class="bi bi-file-earmark-plus"></i> Create a "<?= e(REM_LAPSED_TEMPLATE) ?>" template
+        </button>
+        <span class="text-muted ms-2">Then edit it on the Email Templates page to suit.</span>
+      </form>
+    </div>
+  <?php else: ?>
+    <div class="row g-3 mb-3">
+      <div class="col-lg-7">
+        <div class="border rounded p-2 small bg-light" style="max-height:190px;overflow:auto;">
+          <div class="fw-semibold"><?= e((string)$lapTpl['subject']) ?></div>
+          <div class="text-muted" style="white-space:pre-wrap;"><?= e((string)$lapTpl['body']) ?></div>
+        </div>
+        <div class="form-text">
+          This is the wording that will go out.
+          <a href="?r=emails&edit=<?= (int)$lapTpl['id'] ?>">Edit it</a> before you send anything.
+        </div>
+      </div>
+      <div class="col-lg-5">
+        <form method="post" action="?r=reminders_lapsed_preview" class="mb-2">
+          <input type="hidden" name="band" value="<?= e($lapBand) ?>">
+          <label class="form-label small fw-bold mb-1">How many in this batch</label>
+          <div class="input-group input-group-sm mb-2">
+            <input class="form-control" type="number" name="cap" value="25" min="1" max="200">
+            <button class="btn btn-outline-secondary"><i class="bi bi-eye"></i> Preview - send nothing</button>
+          </div>
+        </form>
+        <form method="post" action="?r=reminders_lapsed_send"
+              onsubmit="return confirm('Really email this batch? These are real students and it cannot be undone.')">
+          <input type="hidden" name="band" value="<?= e($lapBand) ?>">
+          <div class="input-group input-group-sm">
+            <input class="form-control" type="number" name="cap" value="25" min="1" max="200">
+            <button class="btn btn-anb"><i class="bi bi-send"></i> Send this batch</button>
+          </div>
+          <div class="form-text">
+            Everyone emailed is stamped, so the next batch carries on where this one stopped and
+            nobody is contacted twice. Keep it to a hundred or so a day - a few hundred at once
+            looks like bulk mail to the spam filters.
+          </div>
+        </form>
+      </div>
+    </div>
+  <?php endif; ?>
+
+  <?php if ($lapPreview !== null): ?>
+    <div class="alert alert-<?= !empty($lapPreview['was_real']) ? 'success' : 'secondary' ?> small">
+      <strong>
+        <?= !empty($lapPreview['was_real'])
+              ? (int)$lapPreview['sent'].' sent'.((int)$lapPreview['failed'] ? ', '.(int)$lapPreview['failed'].' failed' : '')
+              : (int)$lapPreview['considered'].' would be emailed - nothing was sent' ?>
+      </strong>
+      <div style="max-height:220px;overflow:auto;">
+        <ul class="mb-0" style="padding-left:18px;line-height:1.7;">
+          <?php foreach ($lapPreview['lines'] as $l): ?><li><?= e($l) ?></li><?php endforeach; ?>
+        </ul>
+      </div>
+    </div>
+  <?php endif; ?>
+
+  <div class="small text-muted mb-2">
+    <?= e($bandLabel) ?> - <?= number_format($lapBands[$lapBand]) ?> not contacted yet<?php
+      if ($lapBands[$lapBand] > count($lapRows)) echo ', showing the first '.count($lapRows); ?>
+  </div>
+  <div class="table-responsive">
+  <table class="table table-sm align-middle mb-0">
+    <thead><tr><th>Student</th><th>Last certificate</th><th>Expired</th><th>Lapsed</th></tr></thead>
+    <tbody>
+    <?php if (!$lapRows): ?>
+      <tr><td colspan="4" class="text-muted small">Nobody left in this group.</td></tr>
+    <?php else: foreach ($lapRows as $r): ?>
+      <tr>
+        <td class="fw-semibold small">
+          <a href="?r=student&id=<?= (int)$r['student_id'] ?>" class="text-decoration-none">
+            <?= e(trim($r['first_name'].' '.$r['last_name'])) ?></a>
+          <div class="text-muted fw-normal"><?= e((string)$r['email']) ?></div>
+        </td>
+        <td class="small"><?= e(trim(trim($r['course_code'].' - '.$r['course_title'], ' -'))) ?></td>
+        <td class="small"><?= e(substr((string)$r['expiry_date'],0,10)) ?></td>
+        <td class="small text-muted"><?php $dd = (int)$r['days_ago'];
+          echo $dd < 45 ? $dd.' day'.($dd === 1 ? '' : 's').' ago'
+                        : round($dd/30).' months ago'; ?></td>
+      </tr>
+    <?php endforeach; endif; ?>
     </tbody>
   </table>
   </div>
