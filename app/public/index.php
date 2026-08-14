@@ -558,8 +558,41 @@ case 'student':
     $cert = $pdo->prepare("SELECT c.*, co.title course_title FROM certificates c JOIN enrolments e ON e.id=c.enrolment_id JOIN courses co ON co.id=e.course_id WHERE c.student_id=? ORDER BY c.issue_date DESC");
     $cert->execute([$id]); $certs = $cert->fetchAll();
     require_once __DIR__.'/../lib/usi.php';
+    require_once __DIR__.'/../lib/student_profile.php';
     $usiLast = anb_usi_last_check($pdo, $id);
-    render('student', compact('s','enrolments','certs','usiLast'), $s['first_name'].' '.$s['last_name']);
+
+    // Tabs mirror the layout the office already knows from the old system.
+    // Each one loads only its own data, so a student with years of history
+    // opens as fast as a new one.
+    $tab  = (string)($_GET['tab'] ?? 'overview');
+    $tabs = ['overview'=>'Overview','edit'=>'Edit','avetmiss'=>'AVETMISS','usi'=>'USI','notes'=>'Notes',
+             'documents'=>'Documents','learning'=>'Learning','activity'=>'Activity',
+             'records'=>'Records','training'=>'Training','financial'=>'Financial'];
+    if (!isset($tabs[$tab])) $tab = 'overview';
+
+    $notes = $learning = $units = $activity = $financial = [];
+    switch ($tab) {
+        case 'notes':     $notes     = sp_notes($pdo, $id); break;
+        case 'learning':  $learning  = sp_learning($pdo, $id); break;
+        case 'records':   $units     = sp_units($pdo, $id); break;
+        case 'activity':  $activity  = sp_activity($pdo, $id, $s); break;
+        case 'financial': $financial = sp_financial($pdo, $id); break;
+        case 'overview':  $notes     = sp_notes($pdo, $id); break;
+    }
+    render('student', compact('s','enrolments','certs','usiLast','tab','tabs',
+                              'notes','learning','units','activity','financial'),
+           $s['first_name'].' '.$s['last_name']);
+    break;
+
+case 'student_note_add':
+    require_once __DIR__.'/../lib/student_profile.php';
+    $id = (int)($_POST['id'] ?? 0);
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && $id) {
+        $u = current_user();
+        sp_note_add($pdo, $id, (string)($_POST['note'] ?? ''), (string)($u['name'] ?? $u['email'] ?? ''));
+        $_SESSION['flash'] = 'Note added.';
+    }
+    redirect('?r=student&id='.$id.'&tab=notes');
     break;
 
 /**
