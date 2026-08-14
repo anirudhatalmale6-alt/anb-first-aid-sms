@@ -5,11 +5,40 @@ function dot($ok, $warn=false) {
     if ($warn) return '<span class="pdot bg-warning" title="Pending"></span>';
     return '<span class="pdot bg-danger" title="Not done"></span>';
 }
+
+/**
+ * A dot you can click to change. Each one posts a single field for a single
+ * enrolment, so there is nothing to save and nothing to lose if the page is
+ * closed halfway through a class.
+ */
+function markdot($schedId, $enrolId, $field, $isOn, $labelOn, $labelOff, $warn=false) {
+    $cls = $isOn ? 'bg-success' : ($warn ? 'bg-warning' : 'bg-danger');
+    $t   = $isOn ? $labelOn : $labelOff;
+    return '<form method="post" action="?r=pipe_mark" class="m-0">'
+         . '<input type="hidden" name="schedule_id" value="'.(int)$schedId.'">'
+         . '<input type="hidden" name="enrolment_id" value="'.(int)$enrolId.'">'
+         . '<input type="hidden" name="field" value="'.htmlspecialchars($field, ENT_QUOTES).'">'
+         . ($isOn ? '' : '<input type="hidden" name="on" value="1">')
+         . '<button type="submit" class="btn p-0 border-0 bg-transparent" title="'
+         . htmlspecialchars($t, ENT_QUOTES).' - click to change">'
+         . '<span class="pdot '.$cls.'"></span></button></form>';
+}
+
+/** The same thing for a whole class. */
+function markall($schedId, $field, $label) {
+    return '<form method="post" action="?r=pipe_mark" class="m-0 d-inline">'
+         . '<input type="hidden" name="schedule_id" value="'.(int)$schedId.'">'
+         . '<input type="hidden" name="field" value="'.htmlspecialchars($field, ENT_QUOTES).'">'
+         . '<input type="hidden" name="all" value="1"><input type="hidden" name="on" value="1">'
+         . '<button class="btn btn-sm btn-outline-secondary py-0">'.htmlspecialchars($label).'</button></form>';
+}
 $cols = ['Online','AVETMISS','USI','Paid','ID','Attend.','Tasks'];
 // count fully-ready students
 $ready = 0;
 foreach ($rows as $r) {
-    $ok = $r['online_complete'] && $r['avetmiss_complete'] && $r['usi_number'] && $r['payment_status']==='paid'
+    // usi_verified, not usi_number - anb_generate_certificate() refuses an
+    // unverified USI, so counting one as ready would offer a button that fails.
+    $ok = $r['online_complete'] && $r['avetmiss_complete'] && !empty($r['usi_verified']) && $r['payment_status']==='paid'
         && $r['id_confirmed'] && $r['attendance_marked'] && $r['tasks_satisfactory'];
     if ($ok) $ready++;
 }
@@ -68,7 +97,9 @@ $stamp = function ($t) { return $t ? date('j M, g:ia', strtotime($t . ' UTC')) :
 <div class="alert alert-light border small">
   <i class="bi bi-list-check text-danger"></i>
   Every student in this class at a glance. Green = done, amber = pending, red = outstanding.
-  Use the bulk buttons, then <strong>Sign Off</strong> the whole class in one go — no more checking students one by one.
+  <strong>Click any dot in the Paid, ID, Attend. or Tasks columns to change it</strong>, or use the
+  buttons at the top of those columns to do the whole class at once. Then <strong>Sign Off</strong>
+  to issue every certificate in one go.
 </div>
 
 <div class="card p-0">
@@ -85,16 +116,16 @@ $stamp = function ($t) { return $t ? date('j M, g:ia', strtotime($t . ' UTC')) :
       <tr class="table-light">
         <td colspan="3"></td>
         <td class="pipe-td" colspan="4"></td>
-        <td class="pipe-td"><button class="btn btn-sm btn-outline-secondary py-0">All Sighted</button></td>
-        <td class="pipe-td"><button class="btn btn-sm btn-outline-secondary py-0">All Here</button></td>
-        <td class="pipe-td"><button class="btn btn-sm btn-outline-secondary py-0">All Satisfactory</button></td>
+        <td class="pipe-td"><?= markall($schedule['id'],'id_confirmed','All Sighted') ?></td>
+        <td class="pipe-td"><?= markall($schedule['id'],'attendance_marked','All Here') ?></td>
+        <td class="pipe-td"><?= markall($schedule['id'],'tasks_satisfactory','All Satisfactory') ?></td>
         <td></td>
       </tr>
     </thead>
     <tbody>
     <?php foreach ($rows as $r):
       $paid = $r['payment_status']==='paid';
-      $allGreen = $r['online_complete'] && $r['avetmiss_complete'] && $r['usi_number'] && $paid
+      $allGreen = $r['online_complete'] && $r['avetmiss_complete'] && !empty($r['usi_verified']) && $paid
                   && $r['id_confirmed'] && $r['attendance_marked'] && $r['tasks_satisfactory'];
     ?>
       <tr>
@@ -140,11 +171,38 @@ $stamp = function ($t) { return $t ? date('j M, g:ia', strtotime($t . ' UTC')) :
             </a>
           <?php endif; ?>
         </td>
-        <td class="pipe-td"><?= dot((bool)$r['usi_number']) ?></td>
-        <td class="pipe-td"><?= dot($paid, $r['payment_status']==='part') ?></td>
-        <td class="pipe-td"><?= dot($r['id_confirmed']) ?></td>
-        <td class="pipe-td"><?= dot($r['attendance_marked']) ?></td>
-        <td class="pipe-td"><?= dot($r['tasks_satisfactory'], !$r['tasks_satisfactory'] && $r['attendance_marked']) ?></td>
+        <td class="pipe-td">
+          <?php
+            // A USI sitting in the box proves nothing - the certificate is
+            // refused unless the registry has confirmed it, so this column has
+            // to show that same rule or the screen promises what it can't do.
+            $hasUsi   = trim((string)$r['usi_number']) !== '';
+            $usiOk    = !empty($r['usi_verified']);
+            $byHand   = $usiOk && ($r['usi_verified_method'] ?? '') !== 'registry';
+          ?>
+          <?php if (!$hasUsi): ?>
+            <span class="pdot bg-danger" title="No USI on file"></span>
+            <div class="text-danger" style="font-size:.62rem;">none</div>
+          <?php elseif ($usiOk): ?>
+            <span class="pdot bg-<?= $byHand ? 'warning' : 'success' ?>"
+                  title="<?= $byHand ? 'Ticked by a person, not confirmed by the registry' : 'Confirmed by the USI Registry' ?>"></span>
+            <?php if ($byHand): ?><div class="text-warning-emphasis" style="font-size:.62rem;">by hand</div><?php endif; ?>
+          <?php else: ?>
+            <span class="pdot bg-warning" title="USI on file but not verified - <?= e((string)$r['usi_number']) ?>"></span>
+            <form method="post" action="?r=usi_check" class="m-0">
+              <input type="hidden" name="student_id" value="<?= (int)$r['student_id'] ?>">
+              <input type="hidden" name="schedule_id" value="<?= (int)$schedule['id'] ?>">
+              <button class="btn btn-link p-0 text-decoration-none fw-semibold"
+                      style="font-size:.62rem;" title="Check <?= e((string)$r['usi_number']) ?> against the registry now">
+                verify
+              </button>
+            </form>
+          <?php endif; ?>
+        </td>
+        <td class="pipe-td"><?= markdot($schedule['id'],$r['id'],'payment_status',$paid,'Paid','Not paid - click if they have paid or been invoiced', $r['payment_status']==='part') ?></td>
+        <td class="pipe-td"><?= markdot($schedule['id'],$r['id'],'id_confirmed',(bool)$r['id_confirmed'],'ID sighted','ID not sighted yet') ?></td>
+        <td class="pipe-td"><?= markdot($schedule['id'],$r['id'],'attendance_marked',(bool)$r['attendance_marked'],'Attended','Not marked present') ?></td>
+        <td class="pipe-td"><?= markdot($schedule['id'],$r['id'],'tasks_satisfactory',(bool)$r['tasks_satisfactory'],'Assessed satisfactory','Not assessed yet', !$r['tasks_satisfactory'] && $r['attendance_marked']) ?></td>
         <td class="pipe-td">
           <?php if ($r['status']==='issued'): ?>
             <span class="badge text-bg-success">Issued</span>

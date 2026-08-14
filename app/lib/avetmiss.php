@@ -104,3 +104,23 @@ function avetmiss_sql_complete(string $alias = 's'): string {
     }
     return '(' . implode(' AND ', $parts) . ')';
 }
+
+/**
+ * Everything a student still has to supply before they can be certified,
+ * from their point of view rather than the office's.
+ *
+ * The portal used to keep its own shorter list, so a student could clear
+ * every warning they were shown and still sit red on the class pipeline -
+ * chased for something they were never asked for. One definition, both ends.
+ *
+ * @return array<int,string> human labels, empty when there is nothing left
+ */
+function avetmiss_student_todo(array $s): array {
+    $todo = avetmiss_missing($s);
+    if (trim((string)($s['usi_number'] ?? '')) === '') {
+        array_unshift($todo, 'USI (Unique Student Identifier)');
+    }
+    // Not AVETMISS, but the office cannot reach them without it.
+    if (trim((string)($s['mobile_phone'] ?? '')) === '') $todo[] = 'Mobile number';
+    return $todo;
+}

@@ -87,12 +87,13 @@ if ($r === 'student_login') {
             if (!empty($s['password'])) $ok = password_verify($given, (string)$s['password']);
             else                        $ok = ($given === 'student123');
         }
-        if ($ok) { $_SESSION['student_id'] = $s['id']; redirect('?r=my'); }
+        // fresh login = show the outstanding-details card again
+        if ($ok) { $_SESSION['student_id'] = $s['id']; unset($_SESSION['todo_shown']); redirect('?r=my'); }
         render('student_login', ['error'=>'Invalid email or password.'], 'Student login'); exit;
     }
     render('student_login', [], 'Student login'); exit;
 }
-if ($r === 'student_logout') { unset($_SESSION['student_id']); redirect('?r=student_login'); }
+if ($r === 'student_logout') { unset($_SESSION['student_id'], $_SESSION['todo_shown']); redirect('?r=student_login'); }
 
 if ($r === 'student_forgot') {
     require_once __DIR__ . '/../lib/student_portal.php'; sp_schema(db());
@@ -779,6 +780,7 @@ case 'pipeline':
     require_once __DIR__.'/../lib/avetmiss.php';
     $st = $pdo->prepare("
         SELECT e.*, s.first_name, s.last_name, s.usi_number, s.email,
+               s.usi_verified, s.usi_verified_method,
                s.portal_emailed_at, s.portal_attempted_at, s.portal_error,
                ".avetmiss_select_columns('s')."
         FROM enrolments e JOIN students s ON s.id=e.student_id
@@ -793,6 +795,39 @@ case 'pipeline':
         $rows[$i]['avetmiss_complete'] = $miss ? 0 : 1;
     }
     render('pipeline', compact('schedule','rows'), 'Class pipeline');
+    break;
+
+/**
+ * Mark off what happens on the day: ID sighted, attendance, assessment, payment.
+ *
+ * These four gate the certificate, and until now nothing in the system could
+ * set any of them - the pipeline's "All Sighted / All Here / All Satisfactory"
+ * buttons were bare markup with no form behind them, so a class could never
+ * reach a state where a certificate was allowed to issue.
+ */
+case 'pipe_mark':
+    $schedId = (int)($_POST['schedule_id'] ?? 0);
+    $field   = (string)($_POST['field'] ?? '');
+    $allowed = ['id_confirmed', 'attendance_marked', 'tasks_satisfactory', 'payment_status'];
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !$schedId || !in_array($field, $allowed, true)) {
+        redirect('?r=pipeline&schedule_id='.$schedId);
+    }
+
+    $on = !empty($_POST['on']);
+    $val = $field === 'payment_status' ? ($on ? 'paid' : 'unpaid') : ($on ? 1 : 0);
+
+    if (!empty($_POST['all'])) {
+        // Whole class, but never touch anyone already certified - their record
+        // is evidence now and the certificate was issued against it.
+        $q = $pdo->prepare("UPDATE enrolments SET $field=? WHERE schedule_id=? AND status!='issued'");
+        $q->execute([$val, $schedId]);
+        $_SESSION['flash'] = 'Marked for the whole class.';
+    } else {
+        $eid = (int)($_POST['enrolment_id'] ?? 0);
+        $q = $pdo->prepare("UPDATE enrolments SET $field=? WHERE id=? AND schedule_id=? AND status!='issued'");
+        $q->execute([$val, $eid, $schedId]);
+    }
+    redirect('?r=pipeline&schedule_id='.$schedId);
     break;
 
 case 'class_send_access':
@@ -938,7 +973,11 @@ case 'usi_check':
     $u = current_user();
     $res = anb_usi_verify_student($pdo, $sid, (string)($u['name'] ?? $u['email'] ?? ''));
     $_SESSION['flash'] = ($res['verified'] ? 'USI verified: ' : 'USI not verified. ').$res['message'];
-    redirect('?r=student&id='.$sid);
+    if (!$res['verified']) $_SESSION['flash_error'] = 1;
+    // Checking from the class pipeline should land back on the class, not on
+    // one student - the whole point there is working through a list.
+    $back = (int)($_POST['schedule_id'] ?? 0);
+    redirect($back ? '?r=pipeline&schedule_id='.$back : '?r=student&id='.$sid);
     break;
 
 case 'usi_bulk':

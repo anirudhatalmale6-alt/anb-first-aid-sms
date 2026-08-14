@@ -1,12 +1,49 @@
 <?php
 $flash = $_SESSION['flash'] ?? null; unset($_SESSION['flash']);
-// work out what key details are still missing so the student can fix them
-$missLabels = ['usi_number'=>'USI','date_of_birth'=>'Date of birth','gender'=>'Gender','mobile_phone'=>'Mobile',
-  'street_name'=>'Street address','suburb'=>'Suburb','state'=>'State','postcode'=>'Postcode'];
-$missing = [];
-foreach ($missLabels as $k=>$lbl){ if (empty($me[$k])) $missing[] = $lbl; }
+// The same list the office chases on the class pipeline. This page used to
+// keep a shorter one of its own, so a student could clear everything they were
+// shown here and still be held up for a field nobody ever asked them for.
+require_once __DIR__ . '/../lib/avetmiss.php';
+$missing = avetmiss_student_todo($me);
 $certCount = count($mycerts); $courseCount = count($enrolments);
+
+// Show the reminder card once per visit, not on every click.
+$showTodo = $missing && empty($_SESSION['todo_shown']);
+$_SESSION['todo_shown'] = 1;
 ?>
+
+<?php if ($showTodo): ?>
+<div id="todoCard" style="position:fixed;inset:0;background:rgba(20,10,25,.55);z-index:1080;
+     display:flex;align-items:center;justify-content:center;padding:16px;">
+  <div style="background:#fff;border-radius:14px;max-width:460px;width:100%;
+       box-shadow:0 18px 50px rgba(0,0,0,.3);overflow:hidden;">
+    <div style="background:linear-gradient(135deg,#E53935,#8e24aa);color:#fff;padding:18px 22px;">
+      <div style="font-size:1.15rem;font-weight:700;">Before we can issue your certificate</div>
+      <div style="opacity:.9;font-size:.9rem;margin-top:2px;">
+        <?= count($missing) ?> thing<?= count($missing)===1?'':'s' ?> still needed from you
+      </div>
+    </div>
+    <div style="padding:20px 22px;">
+      <ul style="margin:0 0 16px;padding-left:20px;line-height:1.9;">
+        <?php foreach ($missing as $m): ?>
+          <li><?= e($m) ?></li>
+        <?php endforeach; ?>
+      </ul>
+      <p class="small text-muted">
+        We are required to hold these before a nationally recognised certificate can be
+        issued. It takes about two minutes.
+      </p>
+      <div class="d-flex gap-2">
+        <a href="?r=my_details" class="btn btn-anb flex-grow-1">
+          <i class="bi bi-pencil-square"></i> Complete my details
+        </a>
+        <button type="button" class="btn btn-outline-secondary"
+                onclick="document.getElementById('todoCard').remove()">Later</button>
+      </div>
+    </div>
+  </div>
+</div>
+<?php endif; ?>
 <div style="background:#f4f5f7;min-height:100vh;">
   <!-- top bar -->
   <div style="background:linear-gradient(135deg,#2F1D3A,#4a2d5c);color:#fff;padding:14px 20px;display:flex;justify-content:space-between;align-items:center;box-shadow:0 2px 10px rgba(0,0,0,.12);flex-wrap:wrap;gap:8px;">
