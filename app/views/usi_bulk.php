@@ -146,7 +146,7 @@ $pct = $progress['total'] > 0 ? (int)round($progress['done'] / $progress['total'
         <?php foreach ($problems as $p): ?>
           <tr>
             <td class="small">
-              <a href="?r=student&id=<?= (int)$p['student_id'] ?>">
+              <a href="?r=usi_fix&id=<?= (int)$p['student_id'] ?>" title="See what the registry rejected and correct it">
                 <?= e(trim(($p['first_name'] ?? '').' '.($p['last_name'] ?? ''))) ?: 'student #'.(int)$p['student_id'] ?>
               </a>
             </td>

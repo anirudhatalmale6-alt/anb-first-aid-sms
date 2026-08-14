@@ -1000,6 +1000,49 @@ case 'usi_check':
     redirect($back ? '?r=pipeline&schedule_id='.$back : '?r=student&id='.$sid);
     break;
 
+/**
+ * One screen for a USI that will not verify: what we sent, what came back, and
+ * the boxes to fix it. Previously those three lived on three different pages.
+ */
+case 'usi_fix':
+    require_once __DIR__.'/../lib/usi.php';
+    $id = (int)($_GET['id'] ?? 0);
+    $st = $pdo->prepare("SELECT * FROM students WHERE id=?"); $st->execute([$id]); $s = $st->fetch();
+    if (!$s) { http_response_code(404); echo 'Not found'; break; }
+    $last     = anb_usi_last_check($pdo, $id);
+    $rows     = $last ? anb_usi_check_rows($last) : [];
+    $schedule = (int)($_GET['schedule_id'] ?? 0);
+    $cfg      = anb_usi_config($pdo);
+    render('usi_fix', compact('s','last','rows','schedule','cfg'), 'Fix USI');
+    break;
+
+case 'usi_fix_save':
+    require_once __DIR__.'/../lib/usi.php';
+    $id    = (int)($_POST['id'] ?? 0);
+    $sched = (int)($_POST['schedule_id'] ?? 0);
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !$id) redirect('?r=students');
+
+    $pdo->prepare("UPDATE students SET first_name=?, last_name=?, date_of_birth=?, usi_number=?,
+                   usi_verified=0, usi_verified_date=NULL, usi_verified_method=NULL WHERE id=?")
+        ->execute([
+            trim((string)($_POST['first_name'] ?? '')),
+            trim((string)($_POST['last_name'] ?? '')),
+            trim((string)($_POST['date_of_birth'] ?? '')),
+            strtoupper(trim((string)($_POST['usi_number'] ?? ''))),
+            $id,
+        ]);
+
+    $u   = current_user();
+    $res = anb_usi_verify_student($pdo, $id, (string)($u['name'] ?? $u['email'] ?? ''));
+    $_SESSION['flash'] = ($res['verified'] ? 'Verified. ' : 'Still not verified. ').$res['message'];
+    if (!$res['verified']) $_SESSION['flash_error'] = 1;
+
+    // A student who now verifies is finished with - go back to the list that
+    // sent us here. One that still fails stays put so it can be tried again.
+    if ($res['verified'] && $sched) redirect('?r=pipeline&schedule_id='.$sched);
+    redirect('?r=usi_fix&id='.$id.($sched ? '&schedule_id='.$sched : ''));
+    break;
+
 case 'usi_bulk':
     require_once __DIR__.'/../lib/usi.php';
     $cfg      = anb_usi_config($pdo);

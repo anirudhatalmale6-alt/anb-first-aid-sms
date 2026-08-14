@@ -243,6 +243,9 @@ $stamp = function ($t) { return $t ? date('j M, g:ia', strtotime($t . ' UTC')) :
                 verify
               </button>
             </form>
+            <a href="?r=usi_fix&id=<?= (int)$r['student_id'] ?>&schedule_id=<?= (int)$schedule['id'] ?>"
+               class="text-decoration-none" style="font-size:.62rem;"
+               title="See what the registry rejected and correct it">fix</a>
           <?php endif; ?>
         </td>
         <td class="pipe-td"><?= markdot($schedule['id'],$r['id'],'payment_status',$paid,'Paid','Not paid - click if they have paid or been invoiced', $r['payment_status']==='part') ?></td>

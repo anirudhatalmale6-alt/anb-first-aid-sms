@@ -62,6 +62,12 @@ function anb_usi_schema(PDO $pdo): void {
     if (!in_array('note', $cols, true)) {
         $pdo->exec("ALTER TABLE usi_verify_log ADD COLUMN note TEXT");
     }
+    // And what we actually sent. "Family name: NoMatch" is only half an answer -
+    // the useful half is which spelling was rejected, and the record may well
+    // have been edited since the check ran.
+    foreach (['sent_first', 'sent_family', 'sent_dob'] as $c) {
+        if (!in_array($c, $cols, true)) $pdo->exec("ALTER TABLE usi_verify_log ADD COLUMN $c TEXT");
+    }
 }
 
 /**
@@ -256,7 +262,11 @@ function anb_usi_verify_student(PDO $pdo, int $studentId, string $checkedBy = ''
         }
     }
 
-    anb_usi_log($pdo, $studentId, $usi, $cfg, $r, null, $checkedBy);
+    anb_usi_log($pdo, $studentId, $usi, $cfg, $r, null, $checkedBy, [
+        'first'  => $single !== null ? '' : (string)$s['first_name'],
+        'family' => $single !== null ? $single : (string)$s['last_name'],
+        'dob'    => $dob,
+    ]);
 
     if ($r['verified']) {
         $pdo->prepare("UPDATE students SET usi_verified=1, usi_verified_date=?, usi_verified_method='registry' WHERE id=?")
@@ -361,14 +371,14 @@ function anb_usi_verify_sandbox(PDO $pdo, string $by = ''): array {
 
 /* -------------------------------------------------------------------- log */
 
-function anb_usi_log(PDO $pdo, ?int $studentId, string $usi, array $cfg, ?array $r, ?string $error, string $by): void {
+function anb_usi_log(PDO $pdo, ?int $studentId, string $usi, array $cfg, ?array $r, ?string $error, string $by, array $sent = []): void {
     anb_usi_schema($pdo);
     // checked_at is written explicitly rather than left to the column default,
     // because datetime('now') is UTC and the tick on the student record is
     // written in server local time - side by side they looked ten hours apart.
     $pdo->prepare("INSERT INTO usi_verify_log
-        (student_id, usi, env, org_code, status, first_name_result, family_name_result, dob_result, verified, error, checked_by, checked_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
+        (student_id, usi, env, org_code, status, first_name_result, family_name_result, dob_result, verified, error, checked_by, checked_at, sent_first, sent_family, sent_dob)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
         ->execute([
             $studentId, $usi, $cfg['env'], $cfg['org_code'],
             $r['status'] ?? null,
@@ -377,6 +387,7 @@ function anb_usi_log(PDO $pdo, ?int $studentId, string $usi, array $cfg, ?array 
             $r['dateOfBirth'] ?? null,
             !empty($r['verified']) ? 1 : 0,
             $error, $by, date('Y-m-d H:i:s'),
+            $sent['first'] ?? null, $sent['family'] ?? null, $sent['dob'] ?? null,
         ]);
 }
 

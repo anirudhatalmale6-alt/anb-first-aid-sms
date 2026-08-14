@@ -174,6 +174,10 @@
               <?php endif; ?>
             <?php endif; ?>
 
+            <a href="?r=usi_fix&id=<?= (int)$s['id'] ?>" class="btn btn-sm btn-outline-danger mt-2">
+              <i class="bi bi-wrench-adjustable"></i> Fix this
+            </a>
+
             <div class="text-muted mt-1" style="font-size:.7rem;">
               Checked <?= e((string)$usiLast['checked_at']) ?><?= $usiLast['checked_by'] ? ' by '.e((string)$usiLast['checked_by']) : '' ?>.
               <?php if (!$unknown): ?>
