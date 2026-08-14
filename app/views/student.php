@@ -122,6 +122,67 @@
         </form>
       <?php else: ?>
         <div class="alert alert-danger py-2 small mb-2"><i class="bi bi-exclamation-triangle-fill"></i> Not verified - a certificate cannot be issued until the USI is verified.</div>
+
+        <?php
+          // What the registry actually said last time. Without this the record
+          // only says "not verified", which is the least useful half of it -
+          // the staff member still has to guess which field is wrong.
+          require_once __DIR__ . '/../lib/usi.php';
+          $lastRows = $usiLast ? anb_usi_check_rows($usiLast) : [];
+        ?>
+        <?php if ($usiLast): ?>
+          <div class="border rounded p-2 mb-2" style="background:#fff8f8;">
+            <div class="fw-bold small mb-1">What the registry said</div>
+
+            <?php
+              $status  = (string)($usiLast['status'] ?? '');
+              $unknown = strcasecmp($status, 'Invalid') === 0;
+            ?>
+            <?php if (!empty($usiLast['error'])): ?>
+              <div class="small text-danger mb-1"><?= e((string)$usiLast['error']) ?></div>
+            <?php else: ?>
+              <?php if ($status !== ''): ?>
+                <div class="d-flex justify-content-between small border-bottom py-1">
+                  <span class="text-muted">USI itself</span>
+                  <span class="fw-semibold <?= strcasecmp($status,'Valid')===0 ? 'text-success' : 'text-danger' ?>">
+                    <?= $unknown ? 'Not recognised' : e($status) ?>
+                  </span>
+                </div>
+              <?php endif; ?>
+
+              <?php if ($unknown): ?>
+                <?php
+                  // When the USI does not exist the registry has nothing to compare
+                  // against and returns "no match" for every field. Listing those
+                  // would send someone off correcting a name that is perfectly fine.
+                ?>
+                <div class="small text-muted mt-1">
+                  There is no such USI in the registry, so the name and date of birth were
+                  never compared. Check the USI itself has been typed correctly, or ask the
+                  student to look it up at usi.gov.au - this is usually a wrong number rather
+                  than a wrong name.
+                </div>
+              <?php else: ?>
+                <?php foreach ($lastRows as $row): ?>
+                  <div class="d-flex justify-content-between small border-bottom py-1">
+                    <span class="text-muted"><?= e($row['label']) ?></span>
+                    <span class="fw-semibold <?= $row['ok'] ? 'text-success' : 'text-danger' ?>">
+                      <?= $row['ok'] ? 'Matches' : 'Does NOT match' ?>
+                    </span>
+                  </div>
+                <?php endforeach; ?>
+              <?php endif; ?>
+            <?php endif; ?>
+
+            <div class="text-muted mt-1" style="font-size:.7rem;">
+              Checked <?= e((string)$usiLast['checked_at']) ?><?= $usiLast['checked_by'] ? ' by '.e((string)$usiLast['checked_by']) : '' ?>.
+              <?php if (!$unknown): ?>
+                Anything marked "does not match" is different from what the registry holds -
+                correct it above and check again.
+              <?php endif; ?>
+            </div>
+          </div>
+        <?php endif; ?>
         <?php if (empty($s['usi_number'])): ?>
           <div class="small text-muted">No USI on file yet - add the student's USI first, then verify.</div>
         <?php else: ?>

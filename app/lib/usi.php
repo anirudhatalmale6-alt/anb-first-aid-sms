@@ -911,3 +911,43 @@ function anb_usi_repair_apply(PDO $pdo, string $by, int $limit = 0): array {
     }
     return ['saved' => $saved, 'verified' => $verified, 'failed' => count($failed)];
 }
+
+/**
+ * The last thing the registry said about one student.
+ *
+ * The detail was always captured - it just lived in the flash message that
+ * appeared for one page load after pressing the button. Come back to the
+ * record an hour later and all it said was "not verified", which is the least
+ * useful half of the answer. This puts the per-field result back on the record.
+ */
+function anb_usi_last_check(PDO $pdo, int $studentId): ?array {
+    anb_usi_schema($pdo);
+    $q = $pdo->prepare("SELECT * FROM usi_verify_log WHERE student_id=? ORDER BY id DESC LIMIT 1");
+    $q->execute([$studentId]);
+    return $q->fetch(PDO::FETCH_ASSOC) ?: null;
+}
+
+/**
+ * Turn one logged check into rows for the screen: what was asked, what came back.
+ *
+ * A null field means the registry was not asked about it - a single-name
+ * student has no first/family pair - so it is left out rather than shown as a
+ * failure.
+ *
+ * @return array<int,array{label:string,value:string,ok:bool}>
+ */
+function anb_usi_check_rows(array $log): array {
+    $rows = [];
+    $map = [
+        'first_name_result'  => 'First name',
+        'family_name_result' => 'Family name',
+        'dob_result'         => 'Date of birth',
+    ];
+    foreach ($map as $col => $label) {
+        $v = $log[$col] ?? null;
+        if ($v === null || $v === '') continue;
+        $rows[] = ['label' => $label, 'value' => (string)$v,
+                   'ok' => strcasecmp((string)$v, 'Match') === 0];
+    }
+    return $rows;
+}

@@ -551,7 +551,9 @@ case 'student':
     $enr->execute([$id]); $enrolments = $enr->fetchAll();
     $cert = $pdo->prepare("SELECT c.*, co.title course_title FROM certificates c JOIN enrolments e ON e.id=c.enrolment_id JOIN courses co ON co.id=e.course_id WHERE c.student_id=? ORDER BY c.issue_date DESC");
     $cert->execute([$id]); $certs = $cert->fetchAll();
-    render('student', compact('s','enrolments','certs'), $s['first_name'].' '.$s['last_name']);
+    require_once __DIR__.'/../lib/usi.php';
+    $usiLast = anb_usi_last_check($pdo, $id);
+    render('student', compact('s','enrolments','certs','usiLast'), $s['first_name'].' '.$s['last_name']);
     break;
 
 /**
