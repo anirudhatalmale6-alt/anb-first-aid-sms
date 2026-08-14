@@ -171,3 +171,32 @@ function rem_run(PDO $pdo, bool $dryRun = true, ?int $cap = null): array {
     return ['sent'=>$sent,'failed'=>$failed,'considered'=>count($due),
             'lines'=>$lines,'ran'=>true,'why'=>''];
 }
+
+/**
+ * Build a reminder row for one certificate, whether or not it is "due".
+ *
+ * The scheduled run only picks up certificates inside the 6-week window and
+ * not already sent, which is right for automation. But the office needs to be
+ * able to send one deliberately - to test it on themselves, or because a
+ * student rang - and that should not be blocked by the same rules.
+ *
+ * @return ?array the row shape rem_send_one() expects, or null
+ */
+function rem_row_for_cert(PDO $pdo, int $certId): ?array {
+    rem_schema($pdo);
+    $q = $pdo->prepare("
+        SELECT c.id, c.certificate_number, c.expiry_date, c.reminder_6wk_sent, c.reminder_2wk_sent,
+               s.id student_id, s.first_name, s.last_name, s.email,
+               co.title course_title, co.code course_code,
+               CAST(julianday(date(c.expiry_date)) - julianday(date('now')) AS INTEGER) days_left
+        FROM certificates c
+        JOIN students s   ON s.id = c.student_id
+        JOIN enrolments e ON e.id = c.enrolment_id
+        JOIN courses co   ON co.id = e.course_id
+        WHERE c.id = ?");
+    $q->execute([$certId]);
+    $r = $q->fetch(PDO::FETCH_ASSOC);
+    if (!$r) return null;
+    $r['which'] = ((int)$r['days_left'] <= REM_LEAD_2WK) ? '2wk' : '6wk';
+    return $r;
+}

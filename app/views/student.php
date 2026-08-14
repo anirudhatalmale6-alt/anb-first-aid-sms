@@ -736,6 +736,21 @@ $byRegistry = ($s['usi_verified_method'] ?? '') === 'registry';
               <?php if (!empty($c['emailed_at'])): ?>
                 <div class="text-success" style="font-size:.68rem;">sent <?= e((string)$c['emailed_at']) ?></div>
               <?php endif; ?>
+              <!-- Send the renewal nudge for this certificate on purpose, without
+                   waiting for the automation to decide it is due. -->
+              <form method="post" action="?r=reminders_send_one" class="m-0 d-inline"
+                    onsubmit="return confirm('Email the renewal reminder for this certificate to <?= e($s['email']) ?> now?')">
+                <input type="hidden" name="cert_id" value="<?= (int)$c['id'] ?>">
+                <input type="hidden" name="student" value="<?= (int)$s['id'] ?>">
+                <button class="btn btn-sm btn-outline-secondary py-0 mt-1">
+                  <i class="bi bi-bell"></i> Send renewal reminder
+                </button>
+              </form>
+              <?php if (!empty($c['reminder_6wk_sent']) || !empty($c['reminder_2wk_sent'])): ?>
+                <div class="text-success" style="font-size:.68rem;">
+                  reminder sent <?= e(substr((string)($c['reminder_2wk_sent'] ?: $c['reminder_6wk_sent']),0,10)) ?>
+                </div>
+              <?php endif; ?>
             <?php else: ?>
               <div class="text-muted" style="font-size:.68rem;">no email on file</div>
             <?php endif; ?>

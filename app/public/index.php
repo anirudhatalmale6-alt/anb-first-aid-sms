@@ -1723,23 +1723,29 @@ case 'reminders_toggle':
     redirect('?r=reminders');
     break;
 
-/** One reminder, by hand, for the row the office is looking at. */
+/**
+ * One reminder, by hand. Works from the reminders list and from a student
+ * record, and deliberately ignores the "is it due" rules - sending one on
+ * purpose is a different act from the automation deciding to.
+ */
 case 'reminders_send_one':
     require_once __DIR__.'/../lib/reminders.php';
     rem_schema($pdo);
-    $cid = (int)($_POST['cert_id'] ?? 0);
+    $cid  = (int)($_POST['cert_id'] ?? 0);
+    $back = (int)($_POST['student'] ?? 0);
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && $cid) {
-        $rows = array_values(array_filter(rem_due($pdo), fn($r) => (int)$r['id'] === $cid));
-        if (!$rows) {
-            $_SESSION['flash'] = 'That reminder is not due - it may already have been sent.';
-            $_SESSION['flash_error'] = 1;
+        $row = rem_row_for_cert($pdo, $cid);
+        if (!$row) {
+            $_SESSION['flash'] = 'Certificate not found.'; $_SESSION['flash_error'] = 1;
+        } elseif (empty($row['email'])) {
+            $_SESSION['flash'] = 'That student has no email address on file.'; $_SESSION['flash_error'] = 1;
         } else {
-            [$ok, $msg] = rem_send_one($pdo, $rows[0], false);
+            [$ok, $msg] = rem_send_one($pdo, $row, false);
             $_SESSION['flash'] = $msg;
             if (!$ok) $_SESSION['flash_error'] = 1;
         }
     }
-    redirect('?r=reminders');
+    redirect($back ? '?r=student&id='.$back.'&tab=records' : '?r=reminders');
     break;
 
 
