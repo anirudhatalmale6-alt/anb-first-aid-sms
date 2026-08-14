@@ -573,7 +573,7 @@ case 'student':
     $notes = $learning = $units = $activity = $financial = [];
     switch ($tab) {
         case 'notes':     $notes     = sp_notes($pdo, $id); break;
-        case 'learning':  $learning  = sp_learning($pdo, $id); break;
+        case 'learning':  $learning  = sp_learning_by_course($pdo, $id); break;
         case 'records':   $units     = sp_units($pdo, $id); break;
         case 'activity':  $activity  = sp_activity($pdo, $id, $s); break;
         case 'financial': $financial = sp_financial($pdo, $id); break;
@@ -583,6 +583,22 @@ case 'student':
                               'notes','learning','units','activity','financial'),
            $s['first_name'].' '.$s['last_name']);
     break;
+
+/** Tax invoice / receipt for one enrolment, rendered on demand. */
+case 'receipt':
+    require_once __DIR__.'/../lib/receipt.php';
+    $eid = (int)($_GET['enrolment_id'] ?? 0);
+    try {
+        $r = anb_render_receipt($pdo, $eid);
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: inline; filename="'.$r['filename'].'"');
+        echo $r['pdf'];
+        exit;
+    } catch (Throwable $ex) {
+        http_response_code(404);
+        echo 'Could not build that receipt: '.htmlspecialchars($ex->getMessage(), ENT_QUOTES);
+        exit;
+    }
 
 case 'student_note_add':
     require_once __DIR__.'/../lib/student_profile.php';

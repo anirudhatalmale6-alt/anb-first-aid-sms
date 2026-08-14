@@ -375,30 +375,95 @@ $byRegistry = ($s['usi_verified_method'] ?? '') === 'registry';
 
 <?php /* ------------------------------------------------------------ LEARNING */ ?>
 <?php elseif ($tab === 'learning'): ?>
-  <div class="card p-3">
-    <h6 class="fw-bold mb-2">Online learning</h6>
-    <?php if (!$learning): ?>
-      <div class="text-muted small">This student is not enrolled in anything with online modules.</div>
-    <?php else: ?>
-      <table class="table table-sm align-middle mb-0">
-        <thead><tr><th>Course</th><th>Module</th><th>Type</th><th>Status</th><th>Score</th><th>Last activity</th></tr></thead>
-        <tbody>
-        <?php foreach ($learning as $l):
-          $st = (string)($l['status'] ?? '');
-          $badge = $st === 'completed' ? 'success' : ($st === 'in_progress' ? 'warning' : 'secondary'); ?>
-          <tr>
-            <td class="small fw-semibold"><?= e((string)$l['course_code']) ?></td>
-            <td class="small"><?= e((string)$l['module_title']) ?></td>
-            <td class="small text-muted"><?= e((string)$l['module_type']) ?></td>
-            <td><span class="badge text-bg-<?= $badge ?>"><?= e($st ?: 'not started') ?></span></td>
-            <td class="small"><?= $l['score'] === null ? '—' : (int)$l['score'].'%' ?></td>
-            <td class="small text-muted"><?= e((string)($l['updated_at'] ?? '')) ?></td>
-          </tr>
-        <?php endforeach; ?>
-        </tbody>
-      </table>
-    <?php endif; ?>
-  </div>
+  <?php if (!$learning): ?>
+    <div class="card p-3"><div class="text-muted small">This student has no enrolments.</div></div>
+  <?php endif; ?>
+  <?php
+    // Timestamps are written by SQLite datetime('now'), which is UTC.
+    $when = fn(?string $t): string => $t ? date('D j M Y \a\t g:ia', strtotime($t.' UTC')) : '';
+  ?>
+  <?php foreach ($learning as $c): $en = $c['enrolment']; ?>
+    <div class="card p-3 mb-3">
+      <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+        <div>
+          <h6 class="fw-bold mb-0"><?= e((string)$en['course_title']) ?></h6>
+          <div class="small text-muted"><?= e((string)$en['course_code']) ?> · <?= e((string)$en['plan_title']) ?></div>
+        </div>
+        <span class="badge text-bg-<?= $c['complete'] ? 'success' : ($c['done'] ? 'warning' : 'secondary') ?>">
+          <?= $c['complete'] ? 'Online learning complete' : ($c['done'] ? 'In progress' : 'Not started') ?>
+        </span>
+      </div>
+
+      <div class="row small mb-2">
+        <div class="col-md-6">
+          <div><span class="text-muted">Enrolled:</span>
+            <strong><?= e($when((string)$en['created_at']) ?: '—') ?></strong></div>
+          <?php if (!empty($en['sched_date'])): ?>
+            <div><span class="text-muted">Class:</span>
+              <strong><?= e(date('D j M Y', strtotime((string)$en['sched_date']))) ?></strong></div>
+          <?php endif; ?>
+        </div>
+        <div class="col-md-6">
+          <div><span class="text-muted">Online learning:</span>
+            <strong>
+              <?php if ($c['started_at'] === null): ?>
+                not started
+              <?php elseif ($c['complete']): ?>
+                completed <?= e($when($c['last_at'])) ?>
+              <?php else: ?>
+                started <?= e($when($c['started_at'])) ?>
+              <?php endif; ?>
+            </strong>
+          </div>
+          <?php if ($c['last_at'] !== null): ?>
+            <div><span class="text-muted">Last activity:</span>
+              <strong><?= e($when($c['last_at'])) ?></strong></div>
+          <?php endif; ?>
+        </div>
+      </div>
+
+      <div class="progress mb-2" style="height:20px">
+        <div class="progress-bar bg-<?= $c['complete'] ? 'success' : 'warning' ?>"
+             style="width: <?= (int)$c['pct'] ?>%"><?= (int)$c['pct'] ?>%</div>
+      </div>
+      <div class="small text-muted mb-2"><?= (int)$c['done'] ?> of <?= (int)$c['total'] ?> modules complete</div>
+
+      <?php if (!$c['complete'] && $c['stopped']): ?>
+        <div class="alert alert-warning py-2 small mb-2">
+          <i class="bi bi-bookmark"></i> <strong>Stopped at:</strong>
+          <?= e((string)$c['stopped']['module_title']) ?>
+          <?php if (!empty($c['stopped']['updated_at'])): ?>
+            — last touched <?= e($when((string)$c['stopped']['updated_at'])) ?>
+          <?php else: ?>
+            — never opened
+          <?php endif; ?>
+        </div>
+      <?php endif; ?>
+
+      <?php if ($c['modules']): ?>
+        <a class="small" data-bs-toggle="collapse" href="#mods<?= (int)$en['id'] ?>">Show the <?= (int)$c['total'] ?> modules</a>
+        <div class="collapse mt-2" id="mods<?= (int)$en['id'] ?>">
+          <table class="table table-sm align-middle mb-0">
+            <thead><tr><th>Module</th><th>Type</th><th>Status</th><th>Score</th><th>Attempts</th><th>Date &amp; time</th></tr></thead>
+            <tbody>
+            <?php foreach ($c['modules'] as $m):
+              $st = (string)($m['status'] ?? '');
+              $badge = $st === 'completed' ? 'success' : ($st !== '' ? 'warning' : 'secondary'); ?>
+              <tr>
+                <td class="small"><?= e((string)$m['module_title']) ?></td>
+                <td class="small text-muted"><?= e((string)$m['module_type']) ?></td>
+                <td><span class="badge text-bg-<?= $badge ?>"><?= e($st ?: 'not started') ?></span></td>
+                <td class="small"><?= $m['score'] === null ? '—' : (int)$m['score'].'%' ?></td>
+                <td class="small text-muted"><?= $m['attempts'] === null ? '—' : (int)$m['attempts'] ?></td>
+                <td class="small text-muted"><?= e($when((string)($m['updated_at'] ?? '')) ?: '—') ?></td>
+              </tr>
+            <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
+      <?php endif; ?>
+    </div>
+  <?php endforeach; ?>
 
 <?php /* ------------------------------------------------------------ ACTIVITY */ ?>
 <?php elseif ($tab === 'activity'): ?>
@@ -423,7 +488,7 @@ $byRegistry = ($s['usi_verified_method'] ?? '') === 'registry';
   <div class="card p-3 mb-3">
     <h6 class="fw-bold mb-2">Certificates</h6>
     <table class="table table-sm align-middle mb-0">
-      <thead><tr><th>Number</th><th>Course</th><th>Issued</th><th>Expires</th></tr></thead>
+      <thead><tr><th>Number</th><th>Course</th><th>Issued</th><th>Expires</th><th></th></tr></thead>
       <tbody>
       <?php foreach ($certs as $c): $d = days_until($c['expiry_date']); ?>
         <tr>
@@ -433,8 +498,14 @@ $byRegistry = ($s['usi_verified_method'] ?? '') === 'registry';
           <td class="small"><?= e($c['expiry_date']) ?>
             <?php if ($d !== null && $d < 0): ?><span class="badge text-bg-danger">Expired</span>
             <?php elseif ($d !== null && $d <= 60): ?><span class="badge text-bg-warning">Soon</span><?php endif; ?></td>
+          <td class="text-end">
+            <a class="btn btn-sm btn-outline-danger py-0" target="_blank" rel="noopener"
+               href="?r=cert&num=<?= urlencode((string)$c['certificate_number']) ?>">
+              <i class="bi bi-file-earmark-pdf"></i> Certificate
+            </a>
+          </td>
         </tr>
-      <?php endforeach; if (!$certs): ?><tr><td colspan="4" class="text-muted small">No certificates issued yet.</td></tr><?php endif; ?>
+      <?php endforeach; if (!$certs): ?><tr><td colspan="5" class="text-muted small">No certificates issued yet.</td></tr><?php endif; ?>
       </tbody>
     </table>
   </div>
@@ -521,7 +592,7 @@ $byRegistry = ($s['usi_verified_method'] ?? '') === 'registry';
       <div class="text-muted small">No enrolments to charge for.</div>
     <?php else: ?>
       <table class="table table-sm align-middle mb-0">
-        <thead><tr><th>Course</th><th>Date</th><th>Charged</th><th>Paid</th><th>Status</th></tr></thead>
+        <thead><tr><th>Course</th><th>Date</th><th>Charged</th><th>Paid</th><th>Status</th><th></th></tr></thead>
         <tbody>
         <?php foreach ($financial as $f): ?>
           <tr>
@@ -531,6 +602,13 @@ $byRegistry = ($s['usi_verified_method'] ?? '') === 'registry';
             <td class="small">$<?= number_format((float)$f['amount_due'],2) ?></td>
             <td class="small">$<?= number_format((float)$f['amount_paid'],2) ?></td>
             <td><span class="badge text-bg-<?= $f['payment_status']==='paid'?'success':($f['payment_status']==='part'?'warning':'secondary') ?>"><?= ucfirst((string)$f['payment_status']) ?></span></td>
+            <td class="text-end">
+              <a class="btn btn-sm btn-outline-secondary py-0" target="_blank" rel="noopener"
+                 href="?r=receipt&enrolment_id=<?= (int)$f['id'] ?>"
+                 title="<?= $f['payment_status']==='paid' ? 'Receipt' : 'Tax invoice - this one is not marked paid' ?>">
+                <i class="bi bi-receipt"></i> <?= $f['payment_status']==='paid' ? 'Receipt' : 'Invoice' ?>
+              </a>
+            </td>
           </tr>
         <?php endforeach; ?>
         </tbody>

@@ -126,3 +126,62 @@ function sp_financial(PDO $pdo, int $studentId): array {
     $q->execute([$studentId]);
     return $q->fetchAll(PDO::FETCH_ASSOC);
 }
+
+/**
+ * Online learning grouped by enrolment, the way the office reads it: one card
+ * per course with a progress bar, when they started, when they finished, and
+ * which module they are sitting on right now.
+ *
+ * @return array<int,array<string,mixed>>
+ */
+function sp_learning_by_course(PDO $pdo, int $studentId): array {
+    $rows = sp_learning($pdo, $studentId);
+
+    $enr = $pdo->prepare("SELECT e.id, e.created_at, e.online_complete, e.status,
+               co.code course_code, co.title course_title, p.title plan_title,
+               sc.start_date sched_date
+        FROM enrolments e
+        JOIN courses co ON co.id=e.course_id
+        JOIN plans p ON p.id=e.plan_id
+        LEFT JOIN schedules sc ON sc.id=e.schedule_id
+        WHERE e.student_id=? ORDER BY e.id DESC");
+    $enr->execute([$studentId]);
+
+    $out = [];
+    foreach ($enr->fetchAll(PDO::FETCH_ASSOC) as $e) {
+        $mods = array_values(array_filter($rows, fn($r) => (int)$r['enrolment_id'] === (int)$e['id']));
+        $total = count($mods);
+        $done  = 0; $first = null; $last = null; $stopped = null;
+
+        foreach ($mods as $m) {
+            $st = (string)($m['status'] ?? '');
+            if ($st === 'completed') $done++;
+            $at = (string)($m['updated_at'] ?? '');
+            if ($at !== '') {
+                if ($first === null || strcmp($at, $first) < 0) $first = $at;
+                if ($last  === null || strcmp($at, $last)  > 0) $last  = $at;
+            }
+            // Where they stopped: the module they have open but not finished.
+            // Falls back to the last thing they touched at all.
+            if ($stopped === null && $st !== '' && $st !== 'completed') $stopped = $m;
+        }
+        if ($stopped === null) {
+            foreach ($mods as $m) {
+                if ((string)($m['updated_at'] ?? '') === (string)$last && $last !== null) { $stopped = $m; break; }
+            }
+        }
+
+        $out[] = [
+            'enrolment'  => $e,
+            'modules'    => $mods,
+            'total'      => $total,
+            'done'       => $done,
+            'pct'        => $total > 0 ? (int)round($done / $total * 100) : 0,
+            'started_at' => $first,
+            'last_at'    => $last,
+            'stopped'    => $stopped,
+            'complete'   => ($total > 0 && $done === $total),
+        ];
+    }
+    return $out;
+}
