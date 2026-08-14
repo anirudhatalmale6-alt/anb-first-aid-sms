@@ -95,12 +95,46 @@ function rem_due(PDO $pdo, int $limit = 0): array {
     if ($limit > 0) $sql .= " LIMIT " . $limit;
 
     $rows = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
-    foreach ($rows as $i => $r) {
+    $out = [];
+    foreach ($rows as $r) {
+        // An address that always bounces should not eat a slot out of the daily
+        // cap every single day. It is held back and listed for correction
+        // instead - see rem_blocked().
+        [$ok] = anb_email_usable((string)$r['email']);
+        if (!$ok) continue;
         // Which of the two this send would be.
-        $rows[$i]['which'] = ((int)$r['days_left'] <= REM_LEAD_2WK && empty($r['reminder_2wk_sent']))
+        $r['which'] = ((int)$r['days_left'] <= REM_LEAD_2WK && empty($r['reminder_2wk_sent']))
             ? '2wk' : '6wk';
+        $out[] = $r;
     }
-    return $rows;
+    if ($limit > 0 && count($out) > $limit) $out = array_slice($out, 0, $limit);
+    return $out;
+}
+
+/**
+ * Due, but held back because the record needs correcting first.
+ *
+ * @return array<int,array<string,mixed>>
+ */
+function rem_blocked(PDO $pdo): array {
+    rem_schema($pdo);
+    $rows = $pdo->query("
+        SELECT c.id, c.expiry_date, s.id student_id, s.first_name, s.last_name, s.email
+        FROM certificates c
+        JOIN students s ON s.id = c.student_id
+        WHERE c.expiry_date IS NOT NULL
+          AND date(c.expiry_date) >= date('now')
+          AND date(c.expiry_date) <= date('now', '+" . REM_LEAD_6WK . " day')
+        ORDER BY date(c.expiry_date) ASC")->fetchAll(PDO::FETCH_ASSOC);
+    $out = [];
+    foreach ($rows as $r) {
+        [$ok, $why] = anb_email_usable((string)$r['email']);
+        if ($ok) continue;
+        $r['why']        = $why;
+        $r['suggestion'] = anb_email_suggestion(trim((string)$r['email']));
+        $out[] = $r;
+    }
+    return $out;
 }
 
 /** Certificates that lapsed - a different conversation, never auto-emailed. */
@@ -134,6 +168,20 @@ const REM_LAPSED_BANDS = [
     'y2'  => ['label' => 'Lapsed 1 to 2 years ago', 'min' => 366, 'max' => 730],
     'old' => ['label' => 'Lapsed over 2 years ago', 'min' => 731, 'max' => 100000],
 ];
+
+const REM_LAPSED_CAP_DEFAULT = 100;   // "about 100 a day rather than 341 at once"
+
+/** @return array{on:bool,band:string,cap:int} */
+function rem_lapsed_config(PDO $pdo): array {
+    rem_lapsed_schema($pdo);
+    $s    = anb_settings($pdo);
+    $band = (string)($s['lapsed_band'] ?? 'm6');
+    return [
+        'on'   => ($s['lapsed_on'] ?? '0') === '1',
+        'band' => isset(REM_LAPSED_BANDS[$band]) ? $band : 'm6',
+        'cap'  => max(1, min(200, (int)($s['lapsed_cap'] ?? REM_LAPSED_CAP_DEFAULT))),
+    ];
+}
 
 function rem_lapsed_schema(PDO $pdo): void {
     static $done = false;
@@ -205,8 +253,17 @@ function rem_lapsed_rows(PDO $pdo, string $band, int $limit = 0): array {
                   BETWEEN {$b['min']} AND {$b['max']}
               AND c.lapsed_sent IS NULL
             ORDER BY date(c.expiry_date) DESC";
-    if ($limit > 0) $sql .= " LIMIT " . (int)$limit;
-    return $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+    // Over-fetch, because the bad addresses are dropped after the query and we
+    // still want a full batch.
+    if ($limit > 0) $sql .= " LIMIT " . ((int)$limit + 50);
+    $rows = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+    $out = [];
+    foreach ($rows as $r) {
+        [$ok] = anb_email_usable((string)$r['email']);
+        if ($ok) $out[] = $r;
+    }
+    if ($limit > 0 && count($out) > $limit) $out = array_slice($out, 0, $limit);
+    return $out;
 }
 
 /** The wording offered if the template does not exist yet. Hers to edit. */
@@ -238,8 +295,14 @@ function rem_lapsed_send_one(PDO $pdo, array $row, bool $dryRun = true): array {
     if (!$tpl) return [false, 'The "' . REM_LAPSED_TEMPLATE . '" template does not exist yet.'];
 
     $name = trim((string)$row['first_name'] . ' ' . (string)$row['last_name']);
+
+    [$okAddr, $whyAddr] = anb_email_usable((string)$row['email']);
+    if (!$okAddr)  return [false, 'Skipped ' . $name . ': ' . $whyAddr];
+    $greet = anb_greeting_name((string)$row['first_name'], (string)$row['last_name']);
+    if ($greet === '') return [false, 'Skipped ' . $name . ': no name on the record'];
+
     $vars = [
-        'first_name'  => (string)$row['first_name'],
+        'first_name'  => $greet,
         'last_name'   => (string)$row['last_name'],
         'course'      => trim(trim((string)$row['course_code'] . ' - ' . (string)$row['course_title']), ' -'),
         'expiry_date' => date('d-m-Y', strtotime((string)$row['expiry_date'])),
@@ -295,8 +358,15 @@ function rem_send_one(PDO $pdo, array $row, bool $dryRun = true): array {
     $col   = $which === '2wk' ? 'reminder_2wk_sent' : 'reminder_6wk_sent';
 
     $name = trim((string)$row['first_name'] . ' ' . (string)$row['last_name']);
+
+    // Refuse rather than send something embarrassing or undeliverable.
+    [$okAddr, $whyAddr] = anb_email_usable((string)$row['email']);
+    if (!$okAddr)  return [false, 'Skipped ' . $name . ': ' . $whyAddr];
+    $greet = anb_greeting_name((string)$row['first_name'], (string)$row['last_name']);
+    if ($greet === '') return [false, 'Skipped ' . $name . ': no name on the record'];
+
     $vars = [
-        'first_name'  => (string)$row['first_name'],
+        'first_name'  => $greet,
         'last_name'   => (string)$row['last_name'],
         'course'      => (string)$row['course_code'] . ' - ' . (string)$row['course_title'],
         'expiry_date' => date('d-m-Y', strtotime((string)$row['expiry_date'])),
@@ -403,9 +473,26 @@ function rem_run_daily(PDO $pdo, string $by): array {
     if (!$cfg['on'])                     return ['ran'=>false,'sent'=>0,'failed'=>0,'why'=>'switched off'];
     if (!rem_claim_day($pdo, $by))       return ['ran'=>false,'sent'=>0,'failed'=>0,'why'=>'already run today'];
 
-    $res = rem_run($pdo, false);
-    rem_close_day($pdo, (int)$res['sent'], (int)$res['failed']);
-    return ['ran'=>true,'sent'=>(int)$res['sent'],'failed'=>(int)$res['failed'],'why'=>''];
+    $res  = rem_run($pdo, false);
+    $sent = (int)$res['sent']; $failed = (int)$res['failed'];
+
+    // The lapsed campaign rides the same daily claim, so it also runs once a
+    // day and cannot overlap itself. Its own switch, its own cap - she asked
+    // for "about 100 a day" rather than 341 in one go.
+    $lap = rem_lapsed_config($pdo);
+    if ($lap['on']) {
+        $lres = rem_lapsed_run($pdo, $lap['band'], $lap['cap'], false);
+        $sent   += (int)$lres['sent'];
+        $failed += (int)$lres['failed'];
+        // When a band runs dry, stop rather than silently moving to a colder
+        // list - which group gets contacted is her decision, not a default.
+        if ((int)$lres['considered'] === 0) {
+            anb_setting_save($pdo, 'lapsed_on', '0');
+        }
+    }
+
+    rem_close_day($pdo, $sent, $failed);
+    return ['ran'=>true,'sent'=>$sent,'failed'=>$failed,'why'=>''];
 }
 
 /**

@@ -65,6 +65,33 @@ $isErr = !empty($_SESSION['flash_error']); unset($_SESSION['flash_error']);
         </form>
       </div>
 
+      <?php if ($blocked): ?>
+        <div class="alert alert-danger small mb-2">
+          <strong><?= count($blocked) ?> held back</strong> - these addresses cannot be delivered to,
+          so they are not being emailed and are not using up the daily allowance. Every one of them
+          bounces, and bounces count against you with the mail providers. Fix the address on the
+          student's record and they go out on the next run automatically.
+          <table class="table table-sm mb-0 mt-2">
+            <tbody>
+            <?php foreach ($blocked as $b): ?>
+              <tr>
+                <td class="small">
+                  <a href="?r=student&id=<?= (int)$b['student_id'] ?>">
+                    <?= e(trim($b['first_name'].' '.$b['last_name'])) ?></a>
+                </td>
+                <td class="small"><?= e((string)$b['email']) ?></td>
+                <td class="small text-muted">
+                  <?= e((string)$b['why']) ?><?php if ($b['suggestion']): ?>
+                    - did they mean <strong><?= e((string)$b['suggestion']) ?></strong>?
+                  <?php endif; ?>
+                </td>
+              </tr>
+            <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
+      <?php endif; ?>
+
       <?php if ($lapsed > 0): ?>
         <div class="alert alert-light border small mb-0">
           <strong><?= number_format($lapsed) ?></strong> certificates have <em>already</em> lapsed.
@@ -248,8 +275,38 @@ $bandLabel = REM_LAPSED_BANDS[$lapBand]['label'] ?? '';
             <button class="btn btn-outline-secondary"><i class="bi bi-eye"></i> Preview - send nothing</button>
           </div>
         </form>
+        <div class="border rounded p-2 mb-2 <?= $lapCfg['on'] ? 'border-success bg-light' : '' ?>">
+          <form method="post" action="?r=reminders_lapsed_auto"
+                onsubmit="return confirm('<?= $lapCfg['on']
+                  ? 'Stop the daily lapsed campaign?'
+                  : 'Start emailing this group automatically, every day, until it is finished?' ?>')">
+            <input type="hidden" name="band" value="<?= e($lapBand) ?>">
+            <input type="hidden" name="on" value="<?= $lapCfg['on'] ? '0' : '1' ?>">
+            <label class="form-label small fw-bold mb-1">Send this group automatically</label>
+            <div class="input-group input-group-sm">
+              <span class="input-group-text">a day</span>
+              <input class="form-control" type="number" name="cap"
+                     value="<?= (int)$lapCfg['cap'] ?>" min="1" max="200">
+              <button class="btn btn-<?= $lapCfg['on'] ? 'outline-danger' : 'outline-success' ?>">
+                <?= $lapCfg['on'] ? 'Stop' : 'Start' ?>
+              </button>
+            </div>
+            <div class="form-text">
+              <?php if ($lapCfg['on']): ?>
+                <span class="text-success fw-semibold">Running</span> -
+                <?= (int)$lapCfg['cap'] ?> a day from "<?= e(REM_LAPSED_BANDS[$lapCfg['band']]['label']) ?>",
+                on the same daily run as the renewal reminders. It stops by itself when the group
+                is finished.
+              <?php else: ?>
+                Goes out once a day with the renewal reminders and stops on its own when the group
+                is done. You can stop it at any point.
+              <?php endif; ?>
+            </div>
+          </form>
+        </div>
+
         <form method="post" action="?r=reminders_lapsed_send"
-              onsubmit="return confirm('Really email this batch? These are real students and it cannot be undone.')">
+              onsubmit="return confirm('Really email this batch now? These are real students and it cannot be undone.')">
           <input type="hidden" name="band" value="<?= e($lapBand) ?>">
           <div class="input-group input-group-sm">
             <input class="form-control" type="number" name="cap" value="25" min="1" max="200">

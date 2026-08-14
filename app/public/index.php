@@ -1754,6 +1754,8 @@ case 'reminders':
     $lapTpl     = rem_lapsed_template($pdo);
     $lapPreview = $_SESSION['rem_lapsed_preview'] ?? null; unset($_SESSION['rem_lapsed_preview']);
     $todayRun   = rem_today_run($pdo);
+    $blocked    = rem_blocked($pdo);
+    $lapCfg     = rem_lapsed_config($pdo);
     // Only the next six weeks - the old page listed all 11,000 certificates,
     // oldest expiry first, so the top of it was people years out of date.
     $rows = $pdo->query("
@@ -1765,7 +1767,7 @@ case 'reminders':
           AND date(c.expiry_date) >= date('now')
           AND date(c.expiry_date) <= date('now','+42 day')
         ORDER BY date(c.expiry_date) ASC")->fetchAll();
-    render('reminders', compact('rows','cfg','due','lapsed','preview','todayRun',
+    render('reminders', compact('rows','cfg','due','lapsed','preview','todayRun','blocked','lapCfg',
                                 'lapBands','lapBand','lapRows','lapTpl','lapPreview'), 'Renewal Reminders');
     break;
 
@@ -1779,6 +1781,33 @@ case 'reminders_lapsed_template':
         $_SESSION['flash'] = 'Created the "'.REM_LAPSED_TEMPLATE.'" template. Please read it over and change the wording to suit before sending anything.';
     }
     redirect('?r=emails');
+    break;
+
+/** The daily lapsed campaign: on/off, which group, how many a day. Admin only. */
+case 'reminders_lapsed_auto':
+    require_once __DIR__.'/../lib/reminders.php';
+    $u = current_user();
+    if (($u['role'] ?? 'admin') !== 'admin') {
+        $_SESSION['flash'] = 'Only an administrator can start or stop the lapsed campaign.';
+        $_SESSION['flash_error'] = 1;
+    } elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        rem_lapsed_schema($pdo);
+        $on   = ($_POST['on'] ?? '0') === '1';
+        $band = (string)($_POST['band'] ?? 'm6');
+        $cap  = max(1, min(200, (int)($_POST['cap'] ?? REM_LAPSED_CAP_DEFAULT)));
+        if ($on && !rem_lapsed_template($pdo)) {
+            $_SESSION['flash'] = 'Create the "'.REM_LAPSED_TEMPLATE.'" wording first.';
+            $_SESSION['flash_error'] = 1;
+        } else {
+            anb_setting_save($pdo, 'lapsed_on',   $on ? '1' : '0');
+            anb_setting_save($pdo, 'lapsed_band', isset(REM_LAPSED_BANDS[$band]) ? $band : 'm6');
+            anb_setting_save($pdo, 'lapsed_cap',  (string)$cap);
+            $_SESSION['flash'] = $on
+                ? 'Lapsed campaign is ON - up to '.$cap.' a day, starting with the next daily run.'
+                : 'Lapsed campaign is OFF. Nothing further will be sent to lapsed students.';
+        }
+    }
+    redirect('?r=reminders&band='.urlencode((string)($_POST['band'] ?? 'm6')));
     break;
 
 /** Dry run over a band. Sends nothing, same code path as the real send. */

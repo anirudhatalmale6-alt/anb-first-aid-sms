@@ -196,6 +196,75 @@ function anb_mime_name(string $s): string {
 }
 
 /**
+ * What to call the student in a greeting.
+ *
+ * 158 records have an empty first_name with the whole name sitting in
+ * last_name - "Parwinder Kaur", "Harvinder Singh" - an import artefact. The
+ * renewal reminder merged that to "Hi ," which went out to a real student
+ * before this existed. Falling back to the first word of the surname gives
+ * "Hi Parwinder," which is what the record actually means.
+ *
+ * Placeholders from the same import are treated as empty, or we would greet
+ * somebody as "(unknown)".
+ */
+function anb_greeting_name(?string $first, ?string $last = null): string {
+    $junk  = ['(unknown)', 'unknown', 'n/a', 'na', '-', '.', '?'];
+    $first = trim((string)$first);
+    if ($first !== '' && !in_array(strtolower($first), $junk, true)) return $first;
+
+    $last = trim((string)$last);
+    if ($last === '' || in_array(strtolower($last), $junk, true)) return '';
+    $parts = preg_split('/\s+/', $last) ?: [];
+    return (string)($parts[0] ?? '');
+}
+
+/**
+ * Domains that are somebody's typing rather than a real mail host.
+ *
+ * Not a spam list and not exhaustive - just the handful that turn up in this
+ * data and bounce every single time. A bounce costs sender reputation, so the
+ * address is worth refusing until it is corrected.
+ */
+const ANB_TYPO_DOMAINS = [
+    'gamil.com','gmial.com','gmai.com','gmail.co','gmail.con','gmil.com','gmaill.com','gnail.com',
+    'hotmial.com','hotmai.com','hotmail.co','hotmail.con','hotnail.com','hotmail.cm',
+    'yaho.com','yahoo.con','yahho.com','yhaoo.com','yahoo.co',
+    'outlok.com','outlook.co','outloo.com','oulook.com',
+];
+
+/** The obvious correction for a typo domain, or '' if we do not know one. */
+function anb_email_suggestion(string $email): string {
+    $at = strrpos($email, '@');
+    if ($at === false) return '';
+    $dom = strtolower(substr($email, $at + 1));
+    $map = [
+        'gamil.com'=>'gmail.com','gmial.com'=>'gmail.com','gmai.com'=>'gmail.com','gmail.co'=>'gmail.com',
+        'gmail.con'=>'gmail.com','gmil.com'=>'gmail.com','gmaill.com'=>'gmail.com','gnail.com'=>'gmail.com',
+        'hotmial.com'=>'hotmail.com','hotmai.com'=>'hotmail.com','hotmail.co'=>'hotmail.com',
+        'hotmail.con'=>'hotmail.com','hotnail.com'=>'hotmail.com','hotmail.cm'=>'hotmail.com',
+        'yaho.com'=>'yahoo.com','yahoo.con'=>'yahoo.com','yahho.com'=>'yahoo.com','yhaoo.com'=>'yahoo.com',
+        'yahoo.co'=>'yahoo.com',
+        'outlok.com'=>'outlook.com','outlook.co'=>'outlook.com','outloo.com'=>'outlook.com',
+        'oulook.com'=>'outlook.com',
+    ];
+    return isset($map[$dom]) ? substr($email, 0, $at + 1) . $map[$dom] : '';
+}
+
+/**
+ * Is this address worth sending to?
+ *
+ * @return array{0:bool,1:string} [usable, why not]
+ */
+function anb_email_usable(?string $email): array {
+    $email = trim((string)$email);
+    if ($email === '')                                    return [false, 'no email address'];
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL))       return [false, 'not a valid address'];
+    $dom = strtolower(substr($email, strrpos($email, '@') + 1));
+    if (in_array($dom, ANB_TYPO_DOMAINS, true))           return [false, 'misspelt domain "' . $dom . '"'];
+    return [true, ''];
+}
+
+/**
  * Turn a plain-text email body into the HTML we actually send.
  *
  * Every sender was doing nl2br(htmlspecialchars($body)) which is safe but
