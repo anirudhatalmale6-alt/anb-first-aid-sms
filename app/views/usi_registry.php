@@ -6,6 +6,7 @@
  * @var array $log      recent verification attempts
  * @var ?array $sandbox result of the last sandbox run, if one was just done
  * @var int   $pending  students with a USI on file that has not been verified
+ * @var array $breakdown from anb_usi_verified_breakdown()
  */
 $mode = $cfg['mode'];
 $badge = ['off' => 'secondary', 'test' => 'warning', 'live' => 'success'][$mode] ?? 'secondary';
@@ -50,6 +51,58 @@ $badge = ['off' => 'secondary', 'test' => 'warning', 'live' => 'success'][$mode]
 <?php if (!$cfg['configured']): ?>
   <div class="alert alert-danger"><i class="bi bi-exclamation-triangle-fill"></i> <?= e($cfg['problem']) ?></div>
 <?php endif; ?>
+
+<?php
+  // "Verified" is not one thing. A tick that came across in the migration, or
+  // that someone put there by hand, is somebody's word - only the registry
+  // column is evidence that stands up without a person to vouch for it.
+  $bd = $breakdown;
+  $checkable = $bd['registry'] + $bd['by_hand'] + $bd['unverified'];
+  $pct = $checkable > 0 ? round($bd['registry'] / $checkable * 100) : 0;
+?>
+<div class="card p-3 mb-3">
+  <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+    <h6 class="fw-bold mb-0">How the USIs on file were checked</h6>
+    <span class="small text-muted"><?= (int)$pct ?>% confirmed by the registry</span>
+  </div>
+  <div class="progress mb-3" style="height:20px">
+    <?php if ($checkable > 0): ?>
+      <div class="progress-bar bg-success" style="width: <?= $bd['registry']/$checkable*100 ?>%"
+           title="Confirmed by the registry"></div>
+      <div class="progress-bar bg-warning text-dark" style="width: <?= $bd['by_hand']/$checkable*100 ?>%"
+           title="Ticked by a person"></div>
+      <div class="progress-bar bg-danger" style="width: <?= $bd['unverified']/$checkable*100 ?>%"
+           title="Not verified"></div>
+    <?php endif; ?>
+  </div>
+  <div class="row text-center g-2">
+    <div class="col">
+      <div class="fs-4 fw-bold text-success"><?= (int)$bd['registry'] ?></div>
+      <div class="small text-muted">confirmed by the registry</div>
+    </div>
+    <div class="col">
+      <div class="fs-4 fw-bold text-warning"><?= (int)$bd['by_hand'] ?></div>
+      <div class="small text-muted">ticked by a person</div>
+    </div>
+    <div class="col">
+      <div class="fs-4 fw-bold text-danger"><?= (int)$bd['unverified'] ?></div>
+      <div class="small text-muted">not verified</div>
+    </div>
+    <div class="col">
+      <div class="fs-4 fw-bold text-muted"><?= (int)$bd['no_usi'] ?></div>
+      <div class="small text-muted">no USI on file</div>
+    </div>
+  </div>
+  <?php if ($bd['by_hand'] > 0): ?>
+    <div class="alert alert-warning small mt-3 mb-0">
+      <strong><?= (int)$bd['by_hand'] ?></strong> student<?= $bd['by_hand']===1?' is':'s are' ?>
+      marked verified on somebody's word rather than the registry's - mostly ticks that came
+      across in the migration. They are not wrong, but there is no evidence behind them.
+      Running the bulk check over them turns each one into something an auditor can see for
+      themselves.
+    </div>
+  <?php endif; ?>
+</div>
 
 <div class="row">
   <div class="col-lg-5">
@@ -201,10 +254,15 @@ $badge = ['off' => 'secondary', 'test' => 'warning', 'live' => 'success'][$mode]
                 <td class="small">
                   <?php if (!empty($l['error'])): ?>
                     <span class="text-danger"><?= e((string)$l['error']) ?></span>
+                  <?php elseif ((string)($l['env'] ?? '') === 'by hand'): ?>
+                    <span class="badge bg-warning text-dark"><?= e((string)$l['status']) ?></span>
                   <?php elseif ((int)$l['verified'] === 1): ?>
                     <span class="badge bg-success">verified</span>
                   <?php else: ?>
                     <span class="badge bg-secondary"><?= e((string)$l['status'] ?: 'not verified') ?></span>
+                  <?php endif; ?>
+                  <?php if (!empty($l['note'])): ?>
+                    <div class="text-muted"><?= e((string)$l['note']) ?></div>
                   <?php endif; ?>
                 </td>
                 <td class="small text-muted"><?= e((string)$l['checked_by']) ?></td>

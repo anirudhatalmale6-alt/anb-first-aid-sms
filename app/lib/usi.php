@@ -55,6 +55,45 @@ function anb_usi_schema(PDO $pdo): void {
         checked_by TEXT,
         checked_at TEXT DEFAULT (datetime('now'))
     )");
+
+    // Added later: why somebody ticked a USI by hand. A tick with no reason
+    // behind it is exactly the thing an auditor asks about.
+    $cols = $pdo->query("PRAGMA table_info(usi_verify_log)")->fetchAll(PDO::FETCH_COLUMN, 1);
+    if (!in_array('note', $cols, true)) {
+        $pdo->exec("ALTER TABLE usi_verify_log ADD COLUMN note TEXT");
+    }
+}
+
+/**
+ * How the ticks on file were actually earned.
+ *
+ * A tick that came across in the migration, or that somebody put there by
+ * hand, is not evidence the registry ever agreed. Worth being able to see the
+ * split at a glance rather than assuming "verified" means one thing.
+ */
+function anb_usi_verified_breakdown(PDO $pdo): array {
+    $r = $pdo->query("SELECT
+            COUNT(*) total,
+            SUM(CASE WHEN TRIM(COALESCE(usi_number,''))='' THEN 1 ELSE 0 END) no_usi,
+            SUM(CASE WHEN TRIM(COALESCE(usi_number,''))<>'' AND COALESCE(usi_verified,0)=0 THEN 1 ELSE 0 END) unverified,
+            SUM(CASE WHEN COALESCE(usi_verified,0)=1 AND usi_verified_method='registry' THEN 1 ELSE 0 END) registry,
+            SUM(CASE WHEN COALESCE(usi_verified,0)=1 AND COALESCE(usi_verified_method,'')<>'registry' THEN 1 ELSE 0 END) by_hand
+        FROM students")->fetch(PDO::FETCH_ASSOC) ?: [];
+    foreach (['total','no_usi','unverified','registry','by_hand'] as $k) $r[$k] = (int)($r[$k] ?? 0);
+    return $r;
+}
+
+/** Record a tick (or an untick) that a person made themselves, not the registry. */
+function anb_usi_log_manual(PDO $pdo, int $studentId, string $usi, bool $verified, string $reason, string $by): void {
+    anb_usi_schema($pdo);
+    $pdo->prepare("INSERT INTO usi_verify_log
+        (student_id, usi, env, org_code, status, verified, checked_by, checked_at, note)
+        VALUES (?,?,?,?,?,?,?,?,?)")
+        ->execute([
+            $studentId, $usi, 'by hand', '',
+            $verified ? 'Marked verified by hand' : 'Verification cleared by hand',
+            $verified ? 1 : 0, $by, date('Y-m-d H:i:s'), $reason,
+        ]);
 }
 
 /* ---------------------------------------------------------------- settings */

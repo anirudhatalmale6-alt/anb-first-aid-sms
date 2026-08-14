@@ -93,10 +93,31 @@
     <div class="card p-3 mb-3" style="border-left:4px solid <?= !empty($s['usi_verified'])?'#2e7d32':'#E53935' ?>;">
       <h6 class="fw-bold mb-2"><i class="bi bi-patch-check"></i> USI verification</h6>
       <?php if (!empty($s['usi_verified'])): ?>
-        <div class="alert alert-success py-2 small mb-2"><i class="bi bi-check-circle-fill"></i> Verified<?= !empty($s['usi_verified_method'])?' ('.e($s['usi_verified_method']).')':'' ?><?= !empty($s['usi_verified_date'])?' on '.e($s['usi_verified_date']):'' ?>.</div>
+        <?php $byRegistry = ($s['usi_verified_method'] ?? '') === 'registry'; ?>
+        <div class="alert alert-<?= $byRegistry ? 'success' : 'warning' ?> py-2 small mb-2">
+          <i class="bi bi-<?= $byRegistry ? 'check-circle-fill' : 'person-check' ?>"></i>
+          Verified<?= !empty($s['usi_verified_method'])?' ('.e($s['usi_verified_method']).')':'' ?><?= !empty($s['usi_verified_date'])?' on '.e($s['usi_verified_date']):'' ?>.
+          <?php if (!$byRegistry): ?>
+            <div class="mt-1">
+              This one was ticked by a person, not confirmed by the registry. Running the
+              registry check gives you evidence that stands up on its own.
+            </div>
+          <?php endif; ?>
+        </div>
+        <?php
+          require_once __DIR__ . '/../lib/usi.php';
+          $usiCfg = anb_usi_config(db());
+        ?>
+        <?php if (!$byRegistry && $usiCfg['mode'] === 'live' && $usiCfg['configured'] && !empty($s['usi_number'])): ?>
+          <form method="post" action="?r=usi_check" class="mb-2">
+            <input type="hidden" name="student_id" value="<?= (int)$s['id'] ?>">
+            <button class="btn btn-anb btn-sm"><i class="bi bi-shield-check"></i> Confirm with USI Registry</button>
+          </form>
+        <?php endif; ?>
         <form method="post" action="?r=usi_verify">
           <input type="hidden" name="student_id" value="<?= (int)$s['id'] ?>">
           <input type="hidden" name="unverify" value="1">
+          <input type="hidden" name="reason" value="cleared from the student record">
           <button class="btn btn-sm btn-outline-secondary">Clear verification</button>
         </form>
       <?php else: ?>
@@ -137,7 +158,16 @@
               <input class="form-check-input" type="checkbox" id="usiconfirm" required>
               <label class="form-check-label small" for="usiconfirm">I have verified this USI via the USI portal and it matches the student's details.</label>
             </div>
-            <button class="btn btn-anb btn-sm"><i class="bi bi-patch-check"></i> Mark USI verified</button>
+            <div class="mb-2">
+              <label class="form-label small fw-bold">How was it checked?</label>
+              <input class="form-control form-control-sm" name="reason" required
+                     placeholder="e.g. checked in the USI Portal, 14 Aug, matched">
+              <div class="form-text">
+                Recorded against your name in the verification log. A tick with nothing
+                behind it is what an auditor will ask about.
+              </div>
+            </div>
+            <button class="btn btn-outline-secondary btn-sm"><i class="bi bi-patch-check"></i> Mark verified by hand</button>
           </form>
         <?php endif; ?>
       <?php endif; ?>

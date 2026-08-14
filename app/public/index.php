@@ -704,16 +704,29 @@ case 'generate':
     }
     break;
 
+// Ticking by hand is a person's word, not the registry's. It stays available -
+// staff do legitimately check in the USI Portal - but it now has to say who and
+// why, and it lands in the same audit log as a real registry check.
 case 'usi_verify':
+    require_once __DIR__.'/../lib/usi.php';
     $sid = (int)($_POST['student_id'] ?? 0);
     $method = ($_POST['method'] ?? 'manual') === 'system' ? 'system' : 'manual';
+    $reason = trim((string)($_POST['reason'] ?? ''));
+    $u = current_user();
+    $who = (string)($u['name'] ?? $u['email'] ?? '');
+    $usi = (string)($pdo->query("SELECT usi_number FROM students WHERE id=".$sid)->fetchColumn() ?: '');
+
     if (!empty($_POST['unverify'])) {
         $pdo->prepare("UPDATE students SET usi_verified=0, usi_verified_date=NULL, usi_verified_method=NULL WHERE id=?")->execute([$sid]);
+        anb_usi_log_manual($pdo, $sid, $usi, false, $reason, $who);
         $_SESSION['flash'] = 'USI verification cleared.';
+    } elseif ($reason === '') {
+        $_SESSION['flash'] = 'Please say how this USI was checked before marking it verified by hand.';
     } else {
         $pdo->prepare("UPDATE students SET usi_verified=1, usi_verified_date=?, usi_verified_method=? WHERE id=?")
             ->execute([date('Y-m-d H:i:s'), $method, $sid]);
-        $_SESSION['flash'] = 'USI marked verified.';
+        anb_usi_log_manual($pdo, $sid, $usi, true, $reason, $who);
+        $_SESSION['flash'] = 'Marked verified by hand, and recorded in the verification log.';
     }
     redirect('?r=student&id='.$sid);
     break;
@@ -882,7 +895,8 @@ case 'usi_registry':
     unset($_SESSION['usi_sandbox']);
     $pending = (int)$pdo->query("SELECT COUNT(*) FROM students
         WHERE usi_number IS NOT NULL AND usi_number<>'' AND COALESCE(usi_verified,0)=0")->fetchColumn();
-    render('usi_registry', compact('cfg','log','sandbox','pending'), 'USI Registry');
+    $breakdown = anb_usi_verified_breakdown($pdo);
+    render('usi_registry', compact('cfg','log','sandbox','pending','breakdown'), 'USI Registry');
     break;
 
 case 'usi_registry_save':
