@@ -78,14 +78,28 @@ if ($r === 'survey') {
 if ($r === 'student_login') {
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $em = trim($_POST['email'] ?? '');
-        $st = db()->prepare("SELECT * FROM students WHERE email=?"); $st->execute([$em]); $s = $st->fetch();
         $given = $_POST['password'] ?? '';
-        // Personal password if the student has one set; otherwise the shared starter password
-        // (so no existing student is ever locked out before they receive their own).
-        $ok = false;
-        if ($s) {
-            if (!empty($s['password'])) $ok = password_verify($given, (string)$s['password']);
-            else                        $ok = ($given === 'student123');
+        // 106 students share an address with somebody else - families on one
+        // inbox, company addresses, and some duplicated records. Matching on
+        // email alone would hand whoever logs in the FIRST of those records,
+        // which could be a different person's certificates. So check every
+        // student on that address and take the one whose password fits.
+        $st = db()->prepare("SELECT * FROM students WHERE lower(trim(email))=lower(trim(?)) ORDER BY id");
+        $st->execute([$em]);
+        $candidates = $st->fetchAll(PDO::FETCH_ASSOC);
+
+        $s = null; $ok = false;
+        foreach ($candidates as $cand) {
+            if (!empty($cand['password']) && password_verify($given, (string)$cand['password'])) {
+                $s = $cand; $ok = true; break;
+            }
+        }
+        // Nobody on that address has a matching password of their own. Fall back
+        // to the shared starter password so an existing student is never locked
+        // out before they receive their own - but only when there is exactly one
+        // student there, otherwise we would be guessing which person it is.
+        if (!$ok && count($candidates) === 1 && empty($candidates[0]['password'])) {
+            $s = $candidates[0]; $ok = ($given === 'student123');
         }
         // fresh login = show the outstanding-details card again
         if ($ok) { $_SESSION['student_id'] = $s['id']; unset($_SESSION['todo_shown']); redirect('?r=my'); }
@@ -94,6 +108,30 @@ if ($r === 'student_login') {
     render('student_login', [], 'Student login'); exit;
 }
 if ($r === 'student_logout') { unset($_SESSION['student_id'], $_SESSION['todo_shown']); redirect('?r=student_login'); }
+
+/** A student changing their own password from inside the portal. */
+if ($r === 'my_password') {
+    if (empty($_SESSION['student_id'])) redirect('?r=student_login');
+    require_once __DIR__ . '/../lib/student_portal.php';
+    $pdo = db(); sp_schema($pdo); $sid = (int)$_SESSION['student_id'];
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $cur = (string)($_POST['current'] ?? '');
+        $new = trim((string)($_POST['new'] ?? ''));
+        $st = $pdo->prepare("SELECT password FROM students WHERE id=?"); $st->execute([$sid]);
+        $hash = (string)($st->fetchColumn() ?: '');
+        // Their current password has to be right, otherwise anyone who found an
+        // unattended logged-in screen could lock the student out of their own account.
+        if ($hash === '' || !password_verify($cur, $hash)) {
+            $_SESSION['flash'] = 'That is not your current password.'; $_SESSION['flash_error'] = 1;
+        } elseif (strlen($new) < 6) {
+            $_SESSION['flash'] = 'Your new password needs to be at least 6 characters.'; $_SESSION['flash_error'] = 1;
+        } else {
+            sp_set_password($pdo, $sid, $new);
+            $_SESSION['flash'] = 'Your password has been changed.';
+        }
+    }
+    redirect('?r=my_details');
+}
 
 if ($r === 'student_forgot') {
     require_once __DIR__ . '/../lib/student_portal.php'; sp_schema(db());
@@ -569,7 +607,7 @@ case 'student':
              'documents'=>'Documents','learning'=>'Learning','activity'=>'Activity','records'=>'Records',
              'upcoming'=>'Upcoming','bookings'=>'Bookings','enrolments'=>'Enrolments',
              'classes'=>'Classes','pipelines'=>'Occurrence Pipelines',
-             'invoices'=>'Invoices','payments'=>'Payments'];
+             'invoices'=>'Invoices','payments'=>'Payments','password'=>'Password'];
     // The old names still work - a bookmark should not break because a menu grew.
     if ($tab === 'training')  $tab = 'upcoming';
     if ($tab === 'financial') $tab = 'invoices';
@@ -609,6 +647,59 @@ case 'receipt':
         echo 'Could not build that receipt: '.htmlspecialchars($ex->getMessage(), ENT_QUOTES);
         exit;
     }
+
+/**
+ * Reset a student's portal password.
+ *
+ * Two ways, because the office needs both: email them a fresh one, or set one
+ * there and then and read it out - a student with a dead email address, or one
+ * standing at the desk, could not be helped by an email-only reset.
+ */
+case 'student_pw':
+    require_once __DIR__ . '/../lib/student_portal.php';
+    sp_schema($pdo);
+    $id = (int)($_POST['id'] ?? 0);
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !$id) redirect('?r=students');
+
+    $st = $pdo->prepare("SELECT * FROM students WHERE id=?"); $st->execute([$id]);
+    $stu = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$stu) { http_response_code(404); echo 'Not found'; break; }
+
+    $mode = (string)($_POST['mode'] ?? 'email');
+    if ($mode === 'set') {
+        $plain = trim((string)($_POST['password'] ?? ''));
+        if (strlen($plain) < 6) {
+            $_SESSION['flash'] = 'That password is too short - use at least 6 characters.';
+            $_SESSION['flash_error'] = 1;
+        } else {
+            sp_set_password($pdo, $id, $plain);
+            // Shown once on the next page so it can be read out, then forgotten.
+            $_SESSION['pw_shown'] = $plain;
+            $_SESSION['flash'] = 'Password changed. It is shown below - give it to the student, it will not be shown again.';
+        }
+    } else {
+        [$ok, $msg] = sp_send_portal($pdo, $stu);
+        $_SESSION['flash'] = $ok
+            ? 'A new password has been emailed to '.$stu['email'].'. Their old one no longer works.'
+            : 'Could not email it: '.$msg;
+        if (!$ok) $_SESSION['flash_error'] = 1;
+    }
+    redirect('?r=student&id='.$id.'&tab=password');
+    break;
+
+/** Free a student who has used up their quiz attempts. */
+case 'student_quiz_reset':
+    $id  = (int)($_POST['id'] ?? 0);
+    $mid = (int)($_POST['module_id'] ?? 0);
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && $id && $mid) {
+        $pdo->prepare("UPDATE learner_progress SET attempts=0, status='in_progress', updated_at=datetime('now')
+                       WHERE module_id=? AND status<>'completed'
+                         AND enrolment_id IN (SELECT id FROM enrolments WHERE student_id=?)")
+            ->execute([$mid, $id]);
+        $_SESSION['flash'] = 'Attempts reset - the student can sit it again.';
+    }
+    redirect('?r=student&id='.$id.'&tab=activity');
+    break;
 
 case 'student_note_add':
     require_once __DIR__.'/../lib/student_profile.php';

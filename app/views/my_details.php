@@ -1,6 +1,10 @@
 <?php require_once __DIR__.'/../lib/avetmiss.php';
 $states=['NSW','VIC','QLD','SA','WA','TAS','NT','ACT'];
 $sel=function($a,$b){ return $a===$b?'selected':''; };
+// Without this a student changes their password and the page just reloads
+// looking identical - no way to tell whether it worked.
+$flash = $_SESSION['flash'] ?? null; unset($_SESSION['flash']);
+$flashErr = !empty($_SESSION['flash_error']); unset($_SESSION['flash_error']);
 ?>
 <div style="background:#f4f5f7;min-height:100vh;">
   <div style="background:linear-gradient(135deg,#2F1D3A,#4a2d5c);color:#fff;padding:14px 28px;display:flex;justify-content:space-between;align-items:center;">
@@ -10,6 +14,11 @@ $sel=function($a,$b){ return $a===$b?'selected':''; };
     </div>
     <a href="?r=my" style="color:#ffb3b0;text-decoration:none;"><i class="bi bi-arrow-left"></i> Back to my learning</a>
   </div>
+  <?php if ($flash): ?>
+    <div style="max-width:960px;margin:14px auto 0;padding:0 16px;">
+      <div class="alert alert-<?= $flashErr ? 'danger' : 'success' ?> py-2 mb-0"><?= e($flash) ?></div>
+    </div>
+  <?php endif; ?>
 
   <div style="max-width:820px;margin:0 auto;padding:24px 20px;">
     <div class="card p-3 mb-3" style="border-left:4px solid #E53935;">
@@ -100,6 +109,30 @@ $sel=function($a,$b){ return $a===$b?'selected':''; };
 
       <button class="btn btn-anb w-100"><i class="bi bi-save"></i> Save my details</button>
     </form>
+
+    <div class="card p-3 mt-4">
+      <h6 class="fw-bold mb-2"><i class="bi bi-key"></i> Change my password</h6>
+      <p class="small text-muted">
+        If you were emailed a password when you enrolled, you can change it to something you will
+        remember. If you have forgotten it, log out and use "Forgotten your password?" on the
+        login page instead.
+      </p>
+      <form method="post" action="?r=my_password">
+        <div class="row g-2">
+          <div class="col-md-6">
+            <label class="form-label small fw-semibold mb-0">Current password</label>
+            <input type="password" class="form-control form-control-sm" name="current" required
+                   autocomplete="current-password">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small fw-semibold mb-0">New password</label>
+            <input type="password" class="form-control form-control-sm" name="new" required minlength="6"
+                   placeholder="at least 6 characters" autocomplete="new-password">
+          </div>
+        </div>
+        <button class="btn btn-outline-secondary btn-sm mt-3">Change my password</button>
+      </form>
+    </div>
     <div class="py-4"></div>
   </div>
 </div>

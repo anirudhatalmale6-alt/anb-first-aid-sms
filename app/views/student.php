@@ -18,7 +18,7 @@ $tabUrl = fn(string $t): string => '?r=student&id='.(int)$s['id'].($t === 'overv
 $groups = [
   ['label' => 'Overview',  'tab' => 'overview'],
   ['label' => 'Edit',      'tab' => 'edit'],
-  ['label' => 'Profile',   'children' => ['avetmiss' => 'AVETMISS', 'usi' => 'USI', 'notes' => 'Notes']],
+  ['label' => 'Profile',   'children' => ['avetmiss' => 'AVETMISS', 'usi' => 'USI', 'notes' => 'Notes', 'password' => 'Password']],
   ['label' => 'Documents', 'tab' => 'documents'],
   ['label' => 'Learning',  'tab' => 'learning'],
   ['label' => 'Activity',  'tab' => 'activity'],
@@ -363,6 +363,76 @@ $byRegistry = ($s['usi_verified_method'] ?? '') === 'registry';
     <?php endforeach; endif; ?>
   </div>
 
+<?php /* ------------------------------------------------------------ PASSWORD */ ?>
+<?php elseif ($tab === 'password'): ?>
+  <?php $justSet = $_SESSION['pw_shown'] ?? null; unset($_SESSION['pw_shown']); ?>
+  <div class="card p-3" style="max-width:720px;">
+    <h6 class="fw-bold mb-2">Student portal password</h6>
+    <p class="small text-muted">
+      This is the password <?= e(trim($s['first_name'].' '.$s['last_name'])) ?> uses to log in at
+      <a href="https://sms.anbfirstaidtraining.com.au/?r=student_login" target="_blank" rel="noopener">the student portal</a>.
+      Nobody can look up an existing password - not you, not me - because they are stored scrambled.
+      You can only give them a new one.
+    </p>
+
+    <?php if ($justSet): ?>
+      <div class="alert alert-success">
+        <div class="small">New password for <?= e($s['email'] ?: 'this student') ?>:</div>
+        <div class="fs-4 fw-bold" style="letter-spacing:.05em;"><?= e($justSet) ?></div>
+        <div class="small mt-1">Write it down or read it out now - it will not be shown again.</div>
+      </div>
+    <?php endif; ?>
+
+    <div class="row g-3">
+      <div class="col-md-6">
+        <div class="border rounded p-3 h-100">
+          <div class="fw-bold small mb-1">Email them a new one</div>
+          <p class="small text-muted">
+            Generates a new password and emails it with the login link, using your
+            "Student Portal Access" template.
+          </p>
+          <?php if (!empty($s['email'])): ?>
+            <form method="post" action="?r=student_pw"
+                  onsubmit="return confirm('Email a new password to <?= e($s['email']) ?>? Their current one stops working straight away.')">
+              <input type="hidden" name="id" value="<?= (int)$s['id'] ?>">
+              <input type="hidden" name="mode" value="email">
+              <button class="btn btn-anb btn-sm"><i class="bi bi-envelope"></i> Email a new password</button>
+            </form>
+            <div class="small text-muted mt-2">Goes to <?= e($s['email']) ?></div>
+          <?php else: ?>
+            <div class="small text-danger">No email address on file - use the option on the right.</div>
+          <?php endif; ?>
+        </div>
+      </div>
+
+      <div class="col-md-6">
+        <div class="border rounded p-3 h-100">
+          <div class="fw-bold small mb-1">Set one now</div>
+          <p class="small text-muted">
+            For a student on the phone or at the desk, or one whose email has stopped working.
+            It is shown on screen once so you can read it out.
+          </p>
+          <form method="post" action="?r=student_pw"
+                onsubmit="return confirm('Change this student\'s password now?')">
+            <input type="hidden" name="id" value="<?= (int)$s['id'] ?>">
+            <input type="hidden" name="mode" value="set">
+            <input class="form-control form-control-sm mb-2" name="password" required minlength="6"
+                   placeholder="at least 6 characters" autocomplete="off">
+            <button class="btn btn-outline-secondary btn-sm"><i class="bi bi-key"></i> Set this password</button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <p class="small text-muted mt-3 mb-0">
+      Students can also reset it themselves - there is a "forgotten password" link on the portal
+      login page that emails them a new one, so most of the time nobody needs to ring you.
+      <?php if (!empty($s['portal_emailed_at'])): ?>
+        <br>Portal access was last sent to this student on <?= e((string)$s['portal_emailed_at']) ?>.
+      <?php endif; ?>
+    </p>
+  </div>
+
 <?php /* ----------------------------------------------------------- DOCUMENTS */ ?>
 <?php elseif ($tab === 'documents'): ?>
   <div class="card p-3" style="max-width:720px;">
@@ -485,34 +555,57 @@ $byRegistry = ($s['usi_verified_method'] ?? '') === 'registry';
       <div class="text-muted small">This student has no enrolments, so there is no LLN to record.</div>
     <?php else: ?>
       <table class="table table-sm align-middle mb-0">
-        <thead><tr><th>Course</th><th>Assessment</th><th>Result</th><th>Score</th><th>Attempts</th><th>Completed</th></tr></thead>
+        <thead><tr><th>Course</th><th>Assessment</th><th>Result</th><th>Score</th><th>Attempts</th><th>Completed</th><th></th></tr></thead>
         <tbody>
         <?php foreach ($lln as $l):
-          $done = $l['status'] === 'completed'; ?>
+          $done = $l['status'] === 'completed';
+          $mark = (int)($l['pass_mark'] ?? 0);
+          $sat  = $l['score'] !== null;
+          // Three states worth telling apart: passed, sat and did not reach the
+          // mark (which is a support conversation, not a failure), not sat.
+          $short = $sat && !$done;
+          $used  = (int)($l['attempts'] ?? 0); ?>
           <tr>
             <td class="small fw-semibold"><?= e($l['course_code']) ?></td>
             <td class="small text-muted"><?= e($l['module_title']) ?></td>
             <td>
-              <span class="badge text-bg-<?= $done ? 'success' : ($l['status'] !== '' ? 'warning' : 'secondary') ?>">
-                <?= $done ? 'Completed' : ($l['status'] !== '' ? e($l['status']) : 'Not started') ?>
-              </span>
+              <?php if ($done): ?>
+                <span class="badge text-bg-success">Passed</span>
+              <?php elseif ($short): ?>
+                <span class="badge text-bg-warning">Needs support</span>
+              <?php else: ?>
+                <span class="badge text-bg-secondary">Not sat</span>
+              <?php endif; ?>
             </td>
             <td class="small">
               <?= $l['score'] === null ? '—' : (int)$l['score'].'%' ?>
+              <?php if ($mark > 0): ?>
+                <div class="text-muted" style="font-size:.7rem;">pass mark <?= $mark ?>%</div>
+              <?php endif; ?>
               <?php if ($l['wrong_count'] > 0): ?>
                 <div class="text-muted" style="font-size:.7rem;"><?= (int)$l['wrong_count'] ?> still wrong</div>
               <?php endif; ?>
             </td>
-            <td class="small text-muted"><?= $l['attempts'] === null ? '—' : (int)$l['attempts'] ?></td>
+            <td class="small text-muted"><?= $used ?: '—' ?><?= $used >= 3 ? ' (used up)' : '' ?></td>
             <td class="small text-muted"><?= e($llnWhen($l['done_at']) ?: '—') ?></td>
+            <td class="text-end">
+              <?php if (!$done && $used > 0): ?>
+                <form method="post" action="?r=student_quiz_reset" class="m-0"
+                      onsubmit="return confirm('Let this student sit the LLN again?')">
+                  <input type="hidden" name="id" value="<?= (int)$s['id'] ?>">
+                  <input type="hidden" name="module_id" value="<?= (int)$l['module_id'] ?>">
+                  <button class="btn btn-sm btn-outline-secondary py-0">Let them retry</button>
+                </form>
+              <?php endif; ?>
+            </td>
           </tr>
         <?php endforeach; ?>
         </tbody>
       </table>
       <p class="small text-muted mt-2 mb-0">
-        LLN is recorded as complete when it is submitted - it is there to identify who needs
-        support, not to pass or fail anybody. The score and any wrong answers are kept so you can
-        see who might struggle on the day.
+        A student who does not reach the pass mark shows as <strong>Needs support</strong>, not
+        as a failure - LLN is there to tell you who will need a hand on the day. They can sit it
+        again; after three goes the system stops them, and "Let them retry" opens it back up.
       </p>
     <?php endif; ?>
   </div>
