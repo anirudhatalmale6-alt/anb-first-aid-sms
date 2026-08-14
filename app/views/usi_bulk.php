@@ -116,29 +116,45 @@ $pct = $progress['total'] > 0 ? (int)round($progress['done'] / $progress['total'
           <?php endforeach; ?>
         </ul>
 
-        <div class="table-responsive" style="max-height:420px;overflow:auto">
-          <table class="table table-sm align-middle mb-0">
-            <thead><tr><th>Student</th><th>USI</th><th>Problem</th></tr></thead>
-            <tbody>
-            <?php foreach ($problems as $p): ?>
-              <tr>
-                <td class="small">
-                  <a href="?r=student&id=<?= (int)$p['student_id'] ?>">
-                    <?= e(trim(($p['first_name'] ?? '').' '.($p['last_name'] ?? ''))) ?>
-                  </a>
-                  <span class="d-block text-muted"><?= e((string)$p['date_of_birth']) ?></span>
-                </td>
-                <td><code class="small"><?= e((string)$p['usi_number']) ?></code></td>
-                <td class="small text-muted"><?= e((string)$p['reason']) ?></td>
-              </tr>
-            <?php endforeach; ?>
-            </tbody>
-          </table>
-        </div>
       <?php endif; ?>
     </div>
   </div>
 </div>
+
+<?php if ($problems): ?>
+  <!-- Full width: the problem text is a sentence, so it needs the room to read
+       as one rather than one word per line down a narrow column. -->
+  <div class="card p-3 mb-3">
+    <div class="d-flex align-items-center justify-content-between mb-2">
+      <h6 class="fw-bold mb-0">The <?= count($problems) ?> records to fix</h6>
+      <a class="btn btn-sm btn-outline-danger" href="?r=usi_bulk_csv">
+        <i class="bi bi-download"></i> Download CSV
+      </a>
+    </div>
+    <div class="table-responsive" style="max-height:560px;overflow:auto">
+      <table class="table table-sm align-middle mb-0">
+        <thead class="table-light" style="position:sticky;top:0;z-index:1">
+          <tr><th style="width:22%">Student</th><th style="width:12%">Date of birth</th>
+              <th style="width:14%">USI</th><th>What the registry said</th></tr>
+        </thead>
+        <tbody>
+        <?php foreach ($problems as $p): ?>
+          <tr>
+            <td class="small">
+              <a href="?r=student&id=<?= (int)$p['student_id'] ?>">
+                <?= e(trim(($p['first_name'] ?? '').' '.($p['last_name'] ?? ''))) ?: 'student #'.(int)$p['student_id'] ?>
+              </a>
+            </td>
+            <td class="small text-muted"><?= e((string)$p['date_of_birth']) ?></td>
+            <td><code class="small"><?= e((string)$p['usi_number']) ?></code></td>
+            <td class="small text-muted"><?= e((string)$p['reason']) ?></td>
+          </tr>
+        <?php endforeach; ?>
+        </tbody>
+      </table>
+    </div>
+  </div>
+<?php endif; ?>
 
 <script>
 (function () {
