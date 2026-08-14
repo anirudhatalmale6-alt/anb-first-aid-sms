@@ -24,6 +24,26 @@ function markdot($schedId, $enrolId, $field, $isOn, $labelOn, $labelOff, $warn=f
          . '<span class="pdot '.$cls.'"></span></button></form>';
 }
 
+/**
+ * A three-state picker that saves the moment it changes - the same
+ * Absent/Present and Not Assessed/Satisfactory/Not Yet Satisfactory wording
+ * the trainers already know from the old system.
+ */
+function markselect($schedId, $enrolId, $field, $options, $current, $colours) {
+    $h  = '<form method="post" action="?r=pipe_mark" class="m-0">'
+        . '<input type="hidden" name="schedule_id" value="'.(int)$schedId.'">'
+        . '<input type="hidden" name="enrolment_id" value="'.(int)$enrolId.'">'
+        . '<input type="hidden" name="field" value="'.htmlspecialchars($field, ENT_QUOTES).'">'
+        . '<select name="status" onchange="this.form.submit()" '
+        . 'class="form-select form-select-sm border-0 '.($colours[$current] ?? '').'" '
+        . 'style="font-size:.72rem;padding:2px 18px 2px 6px;background-position:right .2rem center;">';
+    foreach ($options as $v => $label) {
+        $h .= '<option value="'.htmlspecialchars((string)$v, ENT_QUOTES).'"'
+            . ($current === $v ? ' selected' : '').'>'.htmlspecialchars($label).'</option>';
+    }
+    return $h . '</select></form>';
+}
+
 /** The same thing for a whole class. */
 function markall($schedId, $field, $label) {
     return '<form method="post" action="?r=pipe_mark" class="m-0 d-inline">'
@@ -97,9 +117,11 @@ $stamp = function ($t) { return $t ? date('j M, g:ia', strtotime($t . ' UTC')) :
 <div class="alert alert-light border small">
   <i class="bi bi-list-check text-danger"></i>
   Every student in this class at a glance. Green = done, amber = pending, red = outstanding.
-  <strong>Click any dot in the Paid, ID, Attend. or Tasks columns to change it</strong>, or use the
-  buttons at the top of those columns to do the whole class at once. Then <strong>Sign Off</strong>
-  to issue every certificate in one go.
+  <strong>Click the Paid or ID dots to change them, and pick from the Attend. and Tasks
+  drop-downs</strong> — each one saves as you go. The buttons at the top of those columns do the
+  whole class at once. Then <strong>Sign Off</strong> to issue every certificate in one go.
+  A student marked <strong>Absent</strong> or <strong>Not Yet Satisfactory</strong> is left out of
+  the sign-off, which is the point — they should not receive a certificate.
 </div>
 
 <div class="card p-0">
@@ -117,8 +139,24 @@ $stamp = function ($t) { return $t ? date('j M, g:ia', strtotime($t . ' UTC')) :
         <td colspan="3"></td>
         <td class="pipe-td" colspan="4"></td>
         <td class="pipe-td"><?= markall($schedule['id'],'id_confirmed','All Sighted') ?></td>
-        <td class="pipe-td"><?= markall($schedule['id'],'attendance_marked','All Here') ?></td>
-        <td class="pipe-td"><?= markall($schedule['id'],'tasks_satisfactory','All Satisfactory') ?></td>
+        <td class="pipe-td">
+          <form method="post" action="?r=pipe_mark" class="m-0 d-inline">
+            <input type="hidden" name="schedule_id" value="<?= (int)$schedule['id'] ?>">
+            <input type="hidden" name="field" value="attendance">
+            <input type="hidden" name="status" value="present">
+            <input type="hidden" name="all" value="1">
+            <button class="btn btn-sm btn-outline-secondary py-0">All Present</button>
+          </form>
+        </td>
+        <td class="pipe-td">
+          <form method="post" action="?r=pipe_mark" class="m-0 d-inline">
+            <input type="hidden" name="schedule_id" value="<?= (int)$schedule['id'] ?>">
+            <input type="hidden" name="field" value="tasks">
+            <input type="hidden" name="status" value="satisfactory">
+            <input type="hidden" name="all" value="1">
+            <button class="btn btn-sm btn-outline-secondary py-0">All Satisfactory</button>
+          </form>
+        </td>
         <td></td>
       </tr>
     </thead>
@@ -134,7 +172,15 @@ $stamp = function ($t) { return $t ? date('j M, g:ia', strtotime($t . ' UTC')) :
           <div class="text-muted small"><?= e($r['email']) ?></div>
         </td>
         <td class="pipe-td">
+          <?php
+            // Absent / not yet satisfactory are decisions, not things still to
+            // do - saying "Pending" would read as though someone forgot.
+            $att  = (string)($r['attendance_status'] ?? '');
+            $task = (string)($r['tasks_status'] ?? '');
+          ?>
           <?php if ($allGreen): ?><span class="badge text-bg-success">Ready</span>
+          <?php elseif ($att === 'absent'): ?><span class="badge text-bg-dark">Absent</span>
+          <?php elseif ($task === 'not_yet'): ?><span class="badge text-bg-danger">Not yet satisfactory</span>
           <?php else: ?><span class="badge text-bg-warning">Pending</span><?php endif; ?>
         </td>
         <td class="pipe-td">
@@ -201,8 +247,14 @@ $stamp = function ($t) { return $t ? date('j M, g:ia', strtotime($t . ' UTC')) :
         </td>
         <td class="pipe-td"><?= markdot($schedule['id'],$r['id'],'payment_status',$paid,'Paid','Not paid - click if they have paid or been invoiced', $r['payment_status']==='part') ?></td>
         <td class="pipe-td"><?= markdot($schedule['id'],$r['id'],'id_confirmed',(bool)$r['id_confirmed'],'ID sighted','ID not sighted yet') ?></td>
-        <td class="pipe-td"><?= markdot($schedule['id'],$r['id'],'attendance_marked',(bool)$r['attendance_marked'],'Attended','Not marked present') ?></td>
-        <td class="pipe-td"><?= markdot($schedule['id'],$r['id'],'tasks_satisfactory',(bool)$r['tasks_satisfactory'],'Assessed satisfactory','Not assessed yet', !$r['tasks_satisfactory'] && $r['attendance_marked']) ?></td>
+        <td class="pipe-td" style="min-width:122px;">
+          <?= markselect($schedule['id'],$r['id'],'attendance',PIPE_ATTENDANCE,(string)($r['attendance_status'] ?? ''),
+                ['' => 'text-muted', 'present' => 'text-success fw-bold', 'absent' => 'text-danger fw-bold']) ?>
+        </td>
+        <td class="pipe-td" style="min-width:150px;">
+          <?= markselect($schedule['id'],$r['id'],'tasks',PIPE_TASKS,(string)($r['tasks_status'] ?? ''),
+                ['' => 'text-muted', 'satisfactory' => 'text-success fw-bold', 'not_yet' => 'text-danger fw-bold']) ?>
+        </td>
         <td class="pipe-td">
           <?php if ($r['status']==='issued'): ?>
             <span class="badge text-bg-success">Issued</span>

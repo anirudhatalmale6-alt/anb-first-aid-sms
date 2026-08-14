@@ -778,6 +778,7 @@ case 'pipeline':
     if (!$schedule) { http_response_code(404); echo 'Schedule not found'; break; }
     require_once __DIR__.'/../lib/student_portal.php'; sp_schema($pdo);
     require_once __DIR__.'/../lib/avetmiss.php';
+    require_once __DIR__.'/../lib/pipeline.php'; pipe_schema($pdo);
     $st = $pdo->prepare("
         SELECT e.*, s.first_name, s.last_name, s.usi_number, s.email,
                s.usi_verified, s.usi_verified_method,
@@ -806,12 +807,29 @@ case 'pipeline':
  * reach a state where a certificate was allowed to issue.
  */
 case 'pipe_mark':
+    require_once __DIR__.'/../lib/pipeline.php';
+    pipe_schema($pdo);
     $schedId = (int)($_POST['schedule_id'] ?? 0);
     $field   = (string)($_POST['field'] ?? '');
-    $allowed = ['id_confirmed', 'attendance_marked', 'tasks_satisfactory', 'payment_status'];
-    if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !$schedId || !in_array($field, $allowed, true)) {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !$schedId) redirect('?r=pipeline&schedule_id='.$schedId);
+
+    // Attendance and tasks carry three states each, so they come through as a
+    // named status rather than an on/off flag.
+    if ($field === 'attendance' || $field === 'tasks') {
+        $status = (string)($_POST['status'] ?? '');
+        if (!empty($_POST['all'])) {
+            $n = pipe_set_all($pdo, $schedId, $field, $status);
+            $_SESSION['flash'] = 'Marked for '.$n.' student'.($n===1?'':'s').'.';
+        } else {
+            $eid = (int)($_POST['enrolment_id'] ?? 0);
+            if ($field === 'attendance') pipe_set_attendance($pdo, $eid, $status);
+            else                         pipe_set_tasks($pdo, $eid, $status);
+        }
         redirect('?r=pipeline&schedule_id='.$schedId);
     }
+
+    $allowed = ['id_confirmed', 'payment_status'];
+    if (!in_array($field, $allowed, true)) redirect('?r=pipeline&schedule_id='.$schedId);
 
     $on = !empty($_POST['on']);
     $val = $field === 'payment_status' ? ($on ? 'paid' : 'unpaid') : ($on ? 1 : 0);
