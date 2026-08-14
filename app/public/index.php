@@ -602,17 +602,55 @@ case 'student_save':
     break;
 
 case 'enrolments':
-    $rows = $pdo->query("
-        SELECT e.*, s.first_name, s.last_name, co.code course_code, co.title course_title,
-               p.title plan_title, sc.start_date sched_date, l.name location
-        FROM enrolments e
+    // 1,429 enrolments were being drawn in one go with no way to find anybody.
+    // Search + filters + paging, so moving one student is a ten-second job.
+    $q        = trim((string)($_GET['q'] ?? ''));
+    $fStatus  = trim((string)($_GET['status'] ?? ''));
+    $fPay     = trim((string)($_GET['pay'] ?? ''));
+    $fCourse  = (int)($_GET['course'] ?? 0);
+    $fWhen    = trim((string)($_GET['when'] ?? ''));
+    $page     = max(1, (int)($_GET['page'] ?? 1));
+    $perPage  = 50;
+
+    $where = []; $args = [];
+    if ($q !== '') {
+        // One box for the things staff actually have to hand.
+        $where[] = "(s.first_name LIKE ? OR s.last_name LIKE ? OR (s.first_name || ' ' || s.last_name) LIKE ?
+                    OR s.email LIKE ? OR s.usi_number LIKE ? OR co.code LIKE ?)";
+        $like = '%'.$q.'%';
+        array_push($args, $like, $like, $like, $like, $like, $like);
+    }
+    if (in_array($fStatus, ['enrolled','complete','issued','incomplete','withdrawn'], true)) {
+        $where[] = "e.status=?"; $args[] = $fStatus;
+    }
+    if (in_array($fPay, ['paid','part','unpaid'], true)) { $where[] = "e.payment_status=?"; $args[] = $fPay; }
+    if ($fCourse) { $where[] = "e.course_id=?"; $args[] = $fCourse; }
+    if ($fWhen === 'none')     $where[] = "e.schedule_id IS NULL";
+    if ($fWhen === 'upcoming') $where[] = "sc.start_date >= date('now')";
+    if ($fWhen === 'past')     $where[] = "sc.start_date <  date('now')";
+    $sql = $where ? (' WHERE '.implode(' AND ', $where)) : '';
+
+    $from = " FROM enrolments e
         JOIN students s ON s.id=e.student_id
         JOIN courses co ON co.id=e.course_id
         JOIN plans p ON p.id=e.plan_id
         LEFT JOIN schedules sc ON sc.id=e.schedule_id
-        LEFT JOIN locations l ON l.id=e.location_id
-        ORDER BY e.created_at DESC")->fetchAll();
-    render('enrolments', compact('rows'), 'Enrolments');
+        LEFT JOIN locations l ON l.id=e.location_id" . $sql;
+
+    $cq = $pdo->prepare("SELECT COUNT(*)".$from); $cq->execute($args);
+    $total = (int)$cq->fetchColumn();
+    $pages = max(1, (int)ceil($total / $perPage));
+    if ($page > $pages) $page = $pages;
+
+    $rq = $pdo->prepare("SELECT e.*, s.first_name, s.last_name, s.email, co.code course_code, co.title course_title,
+               p.title plan_title, sc.start_date sched_date, sc.start_time sched_time, l.name location"
+        . $from . " ORDER BY COALESCE(sc.start_date, e.start_date) DESC, e.id DESC
+           LIMIT ".$perPage." OFFSET ".(($page-1)*$perPage));
+    $rq->execute($args);
+    $rows = $rq->fetchAll();
+
+    $courses = $pdo->query("SELECT id, code, title FROM courses ORDER BY code")->fetchAll(PDO::FETCH_ASSOC);
+    render('enrolments', compact('rows','total','page','pages','q','fStatus','fPay','fCourse','fWhen','courses'), 'Enrolments');
     break;
 
 case 'schedules':

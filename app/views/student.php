@@ -242,7 +242,7 @@
     <div class="card p-3 mb-3">
       <h6 class="fw-bold mb-2">Enrolments</h6>
       <table class="table table-sm align-middle mb-0">
-        <thead><tr><th>Course</th><th>Class</th><th>Status</th><th>Payment</th><th></th></tr></thead>
+        <thead><tr><th>Course / Plan</th><th>Schedule</th><th>Location</th><th>Status</th><th>Payment</th><th></th></tr></thead>
         <tbody>
         <?php foreach ($enrolments as $en): ?>
           <tr>
@@ -255,13 +255,13 @@
                 </a>
                 <div class="text-muted" style="font-size:.72rem;">
                   <?= e(substr((string)$en['sched_time'],0,5)) ?><?= $en['sched_end'] ? '–'.e(substr((string)$en['sched_end'],0,5)) : '' ?>
-                  <?= $en['sched_location'] ? ' · '.e((string)$en['sched_location']) : '' ?>
                 </div>
               <?php else: ?>
                 <?= e((string)$en['start_date']) ?>
                 <div class="text-muted" style="font-size:.72rem;">not in a class</div>
               <?php endif; ?>
             </td>
+            <td class="small"><?= e((string)($en['sched_location'] ?: '—')) ?></td>
             <td><?= status_badge($en['status']) ?></td>
             <td><span class="badge text-bg-<?= $en['payment_status']==='paid'?'success':($en['payment_status']==='part'?'warning':'secondary') ?>"><?= ucfirst($en['payment_status']) ?></span></td>
             <td class="text-end">
@@ -276,7 +276,7 @@
               <?php endif; ?>
             </td>
           </tr>
-        <?php endforeach; if (!$enrolments): ?><tr><td colspan="5" class="text-muted small">No enrolments.</td></tr><?php endif; ?>
+        <?php endforeach; if (!$enrolments): ?><tr><td colspan="6" class="text-muted small">No enrolments.</td></tr><?php endif; ?>
         </tbody>
       </table>
     </div>
