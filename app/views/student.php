@@ -469,6 +469,54 @@ $byRegistry = ($s['usi_verified_method'] ?? '') === 'registry';
 
 <?php /* ------------------------------------------------------------ ACTIVITY */ ?>
 <?php elseif ($tab === 'activity'): ?>
+  <?php
+    // LLN sits at the top because it is the gate: nothing else in the portal
+    // opens until it is done, so it is the first thing to check when a
+    // student says they cannot get in.
+    $llnWhen = fn(?string $t): string => $t ? date('D j M Y \a\t g:ia', strtotime($t.' UTC')) : '';
+  ?>
+  <div class="card p-3 mb-3" style="max-width:820px;">
+    <h6 class="fw-bold mb-2">LLN assessment</h6>
+    <p class="small text-muted">
+      Language, Literacy and Numeracy. It is the first thing every student has to complete, and
+      the rest of their online learning stays locked until it is done.
+    </p>
+    <?php if (!$lln): ?>
+      <div class="text-muted small">This student has no enrolments, so there is no LLN to record.</div>
+    <?php else: ?>
+      <table class="table table-sm align-middle mb-0">
+        <thead><tr><th>Course</th><th>Assessment</th><th>Result</th><th>Score</th><th>Attempts</th><th>Completed</th></tr></thead>
+        <tbody>
+        <?php foreach ($lln as $l):
+          $done = $l['status'] === 'completed'; ?>
+          <tr>
+            <td class="small fw-semibold"><?= e($l['course_code']) ?></td>
+            <td class="small text-muted"><?= e($l['module_title']) ?></td>
+            <td>
+              <span class="badge text-bg-<?= $done ? 'success' : ($l['status'] !== '' ? 'warning' : 'secondary') ?>">
+                <?= $done ? 'Completed' : ($l['status'] !== '' ? e($l['status']) : 'Not started') ?>
+              </span>
+            </td>
+            <td class="small">
+              <?= $l['score'] === null ? '—' : (int)$l['score'].'%' ?>
+              <?php if ($l['wrong_count'] > 0): ?>
+                <div class="text-muted" style="font-size:.7rem;"><?= (int)$l['wrong_count'] ?> still wrong</div>
+              <?php endif; ?>
+            </td>
+            <td class="small text-muted"><?= $l['attempts'] === null ? '—' : (int)$l['attempts'] ?></td>
+            <td class="small text-muted"><?= e($llnWhen($l['done_at']) ?: '—') ?></td>
+          </tr>
+        <?php endforeach; ?>
+        </tbody>
+      </table>
+      <p class="small text-muted mt-2 mb-0">
+        LLN is recorded as complete when it is submitted - it is there to identify who needs
+        support, not to pass or fail anybody. The score and any wrong answers are kept so you can
+        see who might struggle on the day.
+      </p>
+    <?php endif; ?>
+  </div>
+
   <div class="card p-3" style="max-width:820px;">
     <h6 class="fw-bold mb-2">Activity</h6>
     <?php if (!$activity): ?>
@@ -500,11 +548,23 @@ $byRegistry = ($s['usi_verified_method'] ?? '') === 'registry';
           <td class="small"><?= e($c['expiry_date']) ?>
             <?php if ($d !== null && $d < 0): ?><span class="badge text-bg-danger">Expired</span>
             <?php elseif ($d !== null && $d <= 60): ?><span class="badge text-bg-warning">Soon</span><?php endif; ?></td>
-          <td class="text-end">
+          <td class="text-end text-nowrap">
             <a class="btn btn-sm btn-outline-danger py-0" target="_blank" rel="noopener"
                href="?r=cert&num=<?= urlencode((string)$c['certificate_number']) ?>">
-              <i class="bi bi-file-earmark-pdf"></i> Certificate
+              <i class="bi bi-download"></i> Download
             </a>
+            <?php if (!empty($s['email'])): ?>
+              <a class="btn btn-sm btn-outline-secondary py-0"
+                 href="?r=cert_email&id=<?= (int)$c['id'] ?>&student=<?= (int)$s['id'] ?>"
+                 onclick="return confirm('Email this certificate to <?= e($s['email']) ?>?')">
+                <i class="bi bi-envelope"></i> Email to student
+              </a>
+              <?php if (!empty($c['emailed_at'])): ?>
+                <div class="text-success" style="font-size:.68rem;">sent <?= e((string)$c['emailed_at']) ?></div>
+              <?php endif; ?>
+            <?php else: ?>
+              <div class="text-muted" style="font-size:.68rem;">no email on file</div>
+            <?php endif; ?>
           </td>
         </tr>
       <?php endforeach; if (!$certs): ?><tr><td colspan="5" class="text-muted small">No certificates issued yet.</td></tr><?php endif; ?>

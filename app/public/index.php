@@ -575,12 +575,12 @@ case 'student':
     if ($tab === 'financial') $tab = 'invoices';
     if (!isset($tabs[$tab])) $tab = 'overview';
 
-    $notes = $learning = $units = $activity = $financial = $classes = $bookings = [];
+    $notes = $learning = $units = $activity = $financial = $classes = $bookings = $lln = [];
     switch ($tab) {
         case 'notes':     $notes     = sp_notes($pdo, $id); break;
         case 'learning':  $learning  = sp_learning_by_course($pdo, $id); break;
         case 'records':   $units     = sp_units($pdo, $id); break;
-        case 'activity':  $activity  = sp_activity($pdo, $id, $s); break;
+        case 'activity':  $activity  = sp_activity($pdo, $id, $s); $lln = sp_lln($pdo, $id); break;
         case 'invoices':
         case 'payments':  $financial = sp_financial($pdo, $id); break;
         case 'classes':
@@ -590,7 +590,7 @@ case 'student':
         case 'overview':  $notes     = sp_notes($pdo, $id); break;
     }
     render('student', compact('s','enrolments','certs','usiLast','tab','tabs',
-                              'notes','learning','units','activity','financial','classes','bookings'),
+                              'notes','learning','units','activity','financial','classes','bookings','lln'),
            $s['first_name'].' '.$s['last_name']);
     break;
 
@@ -1461,6 +1461,9 @@ case 'email_test':
     break;
 
 case 'cert_email':
+    // $back lets this be called from a student record as well as the
+    // certificates register, and land the user back where they were.
+    $back = (int)($_GET['student'] ?? 0);
     require_once __DIR__ . '/../lib/mailer.php';
     require_once __DIR__ . '/../lib/certificate.php';
     $cid = (int)($_GET['id'] ?? 0);
@@ -1469,7 +1472,10 @@ case 'cert_email':
         JOIN enrolments e ON e.id=c.enrolment_id JOIN courses co ON co.id=e.course_id WHERE c.id=?");
     $c->execute([$cid]); $cert = $c->fetch();
     if (!$cert) { http_response_code(404); echo 'Certificate not found'; break; }
-    if (empty($cert['email'])) { $_SESSION['flash'] = 'That student has no email address on file.'; redirect('?r=certificates'); }
+    if (empty($cert['email'])) {
+        $_SESSION['flash'] = 'That student has no email address on file.'; $_SESSION['flash_error'] = 1;
+        redirect($back ? '?r=student&id='.$back.'&tab=records' : '?r=certificates');
+    }
     // ensure the PDF exists (lazy-render migrated certs)
     $cert = anb_ensure_cert_pdf($pdo, $cert);
     $pdfPath = __DIR__ . '/../data/' . $cert['file_path'];
@@ -1491,8 +1497,8 @@ case 'cert_email':
     if ($ok) {
         $pdo->prepare("UPDATE certificates SET emailed_at=datetime('now') WHERE id=?")->execute([$cid]);
         $_SESSION['flash'] = 'Certificate emailed to '.$cert['email'].'.';
-    } else $_SESSION['flash'] = 'Could not send: '.$err;
-    redirect('?r=certificates');
+    } else { $_SESSION['flash'] = 'Could not send: '.$err; $_SESSION['flash_error'] = 1; }
+    redirect($back ? '?r=student&id='.$back.'&tab=records' : '?r=certificates');
     break;
 
 // ---------- Organisation Management (files) ----------

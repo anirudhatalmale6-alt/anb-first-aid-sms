@@ -237,3 +237,56 @@ function sp_bookings(PDO $pdo, int $studentId): array {
     $q->execute([$email]);
     return $q->fetchAll(PDO::FETCH_ASSOC);
 }
+
+/**
+ * The student's LLN (Language, Literacy and Numeracy) result for each course.
+ *
+ * LLN is the compulsory first module of every course - it is position 0 and
+ * the portal locks everything else until it is done - so it is found the same
+ * way lms_first_module() finds it rather than by matching on the title, which
+ * would break the day somebody renames it.
+ *
+ * @return array<int,array<string,mixed>>
+ */
+function sp_lln(PDO $pdo, int $studentId): array {
+    $enr = $pdo->prepare("SELECT e.id enrolment_id, e.course_id, e.start_date,
+               co.code course_code, co.title course_title
+        FROM enrolments e JOIN courses co ON co.id = e.course_id
+        WHERE e.student_id = ? ORDER BY e.id DESC");
+    $enr->execute([$studentId]);
+
+    $first = $pdo->prepare("SELECT id, title, type, pass_mark FROM course_modules
+                            WHERE course_id=? AND COALESCE(active,1)=1 ORDER BY position, id LIMIT 1");
+    $prog  = $pdo->prepare("SELECT * FROM learner_progress WHERE enrolment_id=? AND module_id=?");
+
+    $out = [];
+    foreach ($enr->fetchAll(PDO::FETCH_ASSOC) as $e) {
+        $first->execute([(int)$e['course_id']]);
+        $m = $first->fetch(PDO::FETCH_ASSOC);
+        if (!$m) continue;
+
+        $prog->execute([(int)$e['enrolment_id'], (int)$m['id']]);
+        $p = $prog->fetch(PDO::FETCH_ASSOC) ?: null;
+
+        $wrong = [];
+        if ($p && !empty($p['wrong_qids'])) {
+            $decoded = json_decode((string)$p['wrong_qids'], true);
+            if (is_array($decoded)) $wrong = $decoded;
+        }
+
+        $out[] = [
+            'course_code'  => (string)$e['course_code'],
+            'course_title' => (string)$e['course_title'],
+            'module_title' => (string)$m['title'],
+            'enrolment_id' => (int)$e['enrolment_id'],
+            'module_id'    => (int)$m['id'],
+            'status'       => (string)($p['status'] ?? ''),
+            'score'        => $p['score'] ?? null,
+            'attempts'     => $p['attempts'] ?? null,
+            'done_at'      => (string)($p['updated_at'] ?? ''),
+            'pass_mark'    => $m['pass_mark'] ?? null,
+            'wrong_count'  => count($wrong),
+        ];
+    }
+    return $out;
+}
