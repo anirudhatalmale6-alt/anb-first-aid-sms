@@ -102,6 +102,19 @@ $isErr = !empty($_SESSION['flash_error']); unset($_SESSION['flash_error']);
           Last run <?= e($cfg['last_run']) ?> - <?= (int)$cfg['last_count'] ?> sent.
         </div>
       <?php endif; ?>
+      <?php if ($cfg['on']): ?>
+        <div class="small mt-2">
+          <?php if ($todayRun && !empty($todayRun['finished_at'])): ?>
+            <span class="text-success">Today's run is done</span> -
+            <?= (int)$todayRun['sent'] ?> sent<?= (int)$todayRun['failed'] ? ', '.(int)$todayRun['failed'].' failed' : '' ?>.
+          <?php elseif ($todayRun): ?>
+            <span class="text-warning">Today's run is going out now.</span>
+          <?php else: ?>
+            <span class="text-muted">Today's run has not happened yet - up to
+            <?= (int)$cfg['cap'] ?> will go out.</span>
+          <?php endif; ?>
+        </div>
+      <?php endif; ?>
     </div>
   </div>
 </div>
@@ -149,6 +162,10 @@ $isErr = !empty($_SESSION['flash_error']); unset($_SESSION['flash_error']);
           <?php if (!empty($c['reminder_6wk_sent'])): ?>
             <span class="text-success">sent <?= e(substr((string)$c['reminder_6wk_sent'],0,10)) ?></span>
           <?php elseif (empty($c['email'])): ?><span class="text-muted">no email</span>
+          <?php elseif ($d <= 14): ?>
+            <?php /* Inside the last fortnight the 6-week nudge is skipped, not
+                      pending - showing "due" here read as a second email coming. */ ?>
+            <span class="text-muted" title="Too close to expiry - only the 2-week email is sent">—</span>
           <?php else: ?><span class="text-muted">due</span><?php endif; ?>
         </td>
         <td class="small">

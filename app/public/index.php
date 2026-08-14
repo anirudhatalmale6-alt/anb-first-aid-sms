@@ -492,9 +492,10 @@ if ($r === 'reminders_cron') {
     require_once __DIR__ . '/../lib/reminders.php';
     if (($_GET['token'] ?? '') !== 'anb-renewals-2026') { http_response_code(403); echo 'forbidden'; exit; }
     header('Content-Type: text/plain');
-    $res = rem_run(db(), false);
+    set_time_limit(600);
+    $res = rem_run_daily(db(), 'cron');
     echo $res['ran']
-        ? "sent={$res['sent']} failed={$res['failed']} considered={$res['considered']}\n"
+        ? "sent={$res['sent']} failed={$res['failed']}\n"
         : "not run: {$res['why']}\n";
     exit;
 }
@@ -592,6 +593,31 @@ case 'dashboard':
     $cal = ['view'=>$cv,'anchor'=>$anchor,'label'=>$cLabel,'prev'=>$cPrev,'next'=>$cNext,
             'today'=>date('Y-m-d'),'sessions'=>$cal_sessions];
     render('dashboard', compact('stats','expiring','pending','next_sessions','course_counts','cal'), 'Dashboard');
+
+    /**
+     * Fallback trigger for the daily reminder run.
+     *
+     * The proper trigger is cPanel cron hitting ?r=reminders_cron. This is here
+     * so the automation still runs if that job is never added or gets removed -
+     * the previous version of this page claimed to be automated and had nothing
+     * behind it at all, and that must not be possible again.
+     *
+     * It happens AFTER the page has been sent to the browser, so nobody waits
+     * on it, and rem_run_daily() claims the day atomically, so cron and this
+     * cannot both send.
+     */
+    if (function_exists('litespeed_finish_request')) {
+        litespeed_finish_request();
+    } elseif (function_exists('fastcgi_finish_request')) {
+        fastcgi_finish_request();
+    } else {
+        exit;   // no way to detach - do not make somebody wait for 50 emails
+    }
+    ignore_user_abort(true);
+    set_time_limit(600);
+    require_once __DIR__ . '/../lib/reminders.php';
+    rem_run_daily($pdo, 'dashboard');
+    exit;
     break;
 
 case 'students':
@@ -1727,6 +1753,7 @@ case 'reminders':
     $lapRows    = rem_lapsed_rows($pdo, $lapBand, 15);
     $lapTpl     = rem_lapsed_template($pdo);
     $lapPreview = $_SESSION['rem_lapsed_preview'] ?? null; unset($_SESSION['rem_lapsed_preview']);
+    $todayRun   = rem_today_run($pdo);
     // Only the next six weeks - the old page listed all 11,000 certificates,
     // oldest expiry first, so the top of it was people years out of date.
     $rows = $pdo->query("
@@ -1738,7 +1765,7 @@ case 'reminders':
           AND date(c.expiry_date) >= date('now')
           AND date(c.expiry_date) <= date('now','+42 day')
         ORDER BY date(c.expiry_date) ASC")->fetchAll();
-    render('reminders', compact('rows','cfg','due','lapsed','preview',
+    render('reminders', compact('rows','cfg','due','lapsed','preview','todayRun',
                                 'lapBands','lapBand','lapRows','lapTpl','lapPreview'), 'Renewal Reminders');
     break;
 

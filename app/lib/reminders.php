@@ -80,7 +80,14 @@ function rem_due(PDO $pdo, int $limit = 0): array {
           AND date(c.expiry_date) >= date('now')
           AND date(c.expiry_date) <= date('now', '+" . REM_LEAD_6WK . " day')
           AND (
-                (c.reminder_6wk_sent IS NULL)
+                -- The 6-week nudge belongs to the 6-week window only. Without
+                -- the second half of this line, a certificate inside the last
+                -- fortnight still matched \"6wk not sent\", so the day after
+                -- somebody got their 2-week email they qualified again and got
+                -- the 6-week one four days before expiry. 63 people were in
+                -- that window when this was found.
+                (c.reminder_6wk_sent IS NULL
+                 AND date(c.expiry_date) > date('now', '+" . REM_LEAD_2WK . " day'))
              OR (c.reminder_2wk_sent IS NULL
                  AND date(c.expiry_date) <= date('now', '+" . REM_LEAD_2WK . " day'))
           )
@@ -323,6 +330,82 @@ function rem_send_one(PDO $pdo, array $row, bool $dryRun = true): array {
         return [true, 'Emailed ' . $name];
     }
     return [false, 'Failed for ' . $name . ': ' . $err];
+}
+
+/**
+ * Claim today's run, atomically.
+ *
+ * Two things can start a run - cPanel cron and the first person to open the
+ * dashboard - and cron itself can fire twice if a run is slow. Checking a
+ * "last run" setting and then writing it is not enough: two requests can both
+ * read the old value before either writes. So the claim IS the write, and the
+ * primary key does the arbitration - whoever loses gets a constraint violation
+ * and goes home.
+ *
+ * @return bool true if this request owns today's run
+ */
+function rem_claim_day(PDO $pdo, string $by): bool {
+    rem_schema($pdo);
+    $pdo->exec("CREATE TABLE IF NOT EXISTS reminder_runs (
+        run_date   TEXT PRIMARY KEY,
+        started_at TEXT,
+        started_by TEXT,
+        sent       INTEGER,
+        failed     INTEGER,
+        finished_at TEXT
+    )");
+    // A claim that was never closed means the run died part-way - the dashboard
+    // trigger detaches from the request, and a detached process can be killed.
+    // Without this, that day would stay claimed with nothing sent and the page
+    // would read "going out now" forever. Half an hour is far longer than a
+    // capped run takes (50 emails ran in 28 seconds).
+    // Compared in Sydney time on purpose: started_at is written with date(),
+    // which is local, while SQLite's datetime('now') is UTC.
+    $pdo->prepare("DELETE FROM reminder_runs
+                   WHERE run_date=? AND finished_at IS NULL AND started_at < ?")
+        ->execute([date('Y-m-d'), date('Y-m-d H:i:s', time() - 1800)]);
+
+    try {
+        $pdo->prepare("INSERT INTO reminder_runs (run_date, started_at, started_by) VALUES (?,?,?)")
+            ->execute([date('Y-m-d'), date('Y-m-d H:i:s'), $by]);
+        return true;
+    } catch (PDOException $e) {
+        return false;   // somebody already has today
+    }
+}
+
+function rem_close_day(PDO $pdo, int $sent, int $failed): void {
+    $pdo->prepare("UPDATE reminder_runs SET sent=?, failed=?, finished_at=? WHERE run_date=?")
+        ->execute([$sent, $failed, date('Y-m-d H:i:s'), date('Y-m-d')]);
+}
+
+/** Has today's run already happened? For display only - never for gating. */
+function rem_today_run(PDO $pdo): ?array {
+    rem_schema($pdo);
+    $pdo->exec("CREATE TABLE IF NOT EXISTS reminder_runs (
+        run_date TEXT PRIMARY KEY, started_at TEXT, started_by TEXT,
+        sent INTEGER, failed INTEGER, finished_at TEXT)");
+    $q = $pdo->prepare("SELECT * FROM reminder_runs WHERE run_date=?");
+    $q->execute([date('Y-m-d')]);
+    return $q->fetch(PDO::FETCH_ASSOC) ?: null;
+}
+
+/**
+ * The daily run, wherever it is triggered from.
+ *
+ * Safe to call on every page load: it does nothing unless the switch is on and
+ * unless this request wins the claim for today.
+ *
+ * @return array{ran:bool,sent:int,failed:int,why:string}
+ */
+function rem_run_daily(PDO $pdo, string $by): array {
+    $cfg = rem_config($pdo);
+    if (!$cfg['on'])                     return ['ran'=>false,'sent'=>0,'failed'=>0,'why'=>'switched off'];
+    if (!rem_claim_day($pdo, $by))       return ['ran'=>false,'sent'=>0,'failed'=>0,'why'=>'already run today'];
+
+    $res = rem_run($pdo, false);
+    rem_close_day($pdo, (int)$res['sent'], (int)$res['failed']);
+    return ['ran'=>true,'sent'=>(int)$res['sent'],'failed'=>(int)$res['failed'],'why'=>''];
 }
 
 /**
