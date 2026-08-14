@@ -102,7 +102,12 @@ if ($r === 'student_login') {
             $s = $candidates[0]; $ok = ($given === 'student123');
         }
         // fresh login = show the outstanding-details card again
-        if ($ok) { $_SESSION['student_id'] = $s['id']; unset($_SESSION['todo_shown']); redirect('?r=my'); }
+        if ($ok) {
+            $_SESSION['student_id'] = $s['id']; unset($_SESSION['todo_shown']);
+            db()->prepare("UPDATE students SET last_login_at=? WHERE id=?")
+                ->execute([date('Y-m-d H:i:s'), (int)$s['id']]);
+            redirect('?r=my');
+        }
         render('student_login', ['error'=>'Invalid email or password.'], 'Student login'); exit;
     }
     render('student_login', [], 'Student login'); exit;
@@ -665,24 +670,25 @@ case 'student_pw':
     $stu = $st->fetch(PDO::FETCH_ASSOC);
     if (!$stu) { http_response_code(404); echo 'Not found'; break; }
 
-    $mode = (string)($_POST['mode'] ?? 'email');
-    if ($mode === 'set') {
-        $plain = trim((string)($_POST['password'] ?? ''));
-        if (strlen($plain) < 6) {
-            $_SESSION['flash'] = 'That password is too short - use at least 6 characters.';
-            $_SESSION['flash_error'] = 1;
-        } else {
-            sp_set_password($pdo, $id, $plain);
-            // Shown once on the next page so it can be read out, then forgotten.
-            $_SESSION['pw_shown'] = $plain;
-            $_SESSION['flash'] = 'Password changed. It is shown below - give it to the student, it will not be shown again.';
-        }
+    $plain  = trim((string)($_POST['password'] ?? ''));
+    $notify = !empty($_POST['notify']);
+    if (strlen($plain) < 6) {
+        $_SESSION['flash'] = 'That password is too short - use at least 6 characters.';
+        $_SESSION['flash_error'] = 1;
     } else {
-        [$ok, $msg] = sp_send_portal($pdo, $stu);
-        $_SESSION['flash'] = $ok
-            ? 'A new password has been emailed to '.$stu['email'].'. Their old one no longer works.'
-            : 'Could not email it: '.$msg;
-        if (!$ok) $_SESSION['flash_error'] = 1;
+        sp_set_password($pdo, $id, $plain);
+        // Shown once on the next page so it can be read out, then forgotten.
+        $_SESSION['pw_shown'] = $plain;
+        $msg = 'Password changed. It is shown below - give it to the student, it will not be shown again.';
+        if ($notify && !empty($stu['email'])) {
+            // Reuse the Student Portal Access email, but keep the password the
+            // office just chose rather than generating another one behind them.
+            [$ok, $err] = sp_send_portal($pdo, $stu, $plain);
+            $msg .= $ok ? ' It has also been emailed to '.$stu['email'].'.'
+                        : ' It could NOT be emailed: '.$err;
+            if (!$ok) $_SESSION['flash_error'] = 1;
+        }
+        $_SESSION['flash'] = $msg;
     }
     redirect('?r=student&id='.$id.'&tab=password');
     break;

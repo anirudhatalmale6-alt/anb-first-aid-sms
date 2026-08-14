@@ -74,8 +74,13 @@ $byRegistry = ($s['usi_verified_method'] ?? '') === 'registry';
 
 <?php /* ------------------------------------------------------------ OVERVIEW */ ?>
 <?php if ($tab === 'overview'): ?>
+  <?php
+    $addr = trim(implode(' ', array_filter([trim((string)$s['unit_flat']), trim((string)$s['street_number']), trim((string)$s['street_name'])])));
+    $addr2 = trim(implode(', ', array_filter([$s['suburb'], $s['state'], $s['postcode']])));
+    $stamp = fn(?string $t): string => $t ? date('j M Y \a\t g:ia', strtotime($t)) : '';
+  ?>
   <div class="row g-3">
-    <div class="col-lg-6">
+    <div class="col-xl-7 col-lg-8">
       <div class="card p-3 mb-3">
         <h6 class="fw-bold mb-3">Student Details</h6>
         <?php
@@ -83,7 +88,7 @@ $byRegistry = ($s['usi_verified_method'] ?? '') === 'registry';
             'ID' => (string)$s['id'],
             'Legacy student #' => (string)($s['external_id'] ?: '—'),
             'RTO Data Cloud ID' => (string)($s['rto_person_id'] ?: '—'),
-            'Name' => trim($s['first_name'].' '.$s['last_name']),
+            'Name' => trim($s['salutation'].' '.$s['first_name'].' '.$s['last_name']),
             'First / given name' => (string)($s['first_name'] ?: '—'),
             'Last name / surname' => (string)($s['last_name'] ?: '—'),
             'Date of birth' => (string)($s['date_of_birth'] ?: '—'),
@@ -95,6 +100,17 @@ $byRegistry = ($s['usi_verified_method'] ?? '') === 'registry';
             <span class="text-muted"><?= e($k) ?></span><span class="fw-semibold text-end"><?= e($v) ?></span>
           </div>
         <?php endforeach; ?>
+
+        <div class="d-flex justify-content-between border-bottom py-2 small">
+          <span class="text-muted">Residential and postal address</span>
+          <span class="fw-semibold text-end">
+            <?php if ($addr === '' && $addr2 === ''): ?>—
+            <?php else: ?>
+              <?= e($addr) ?><?php if ($addr2 !== ''): ?><br><?= e($addr2) ?><?php endif; ?>
+            <?php endif; ?>
+          </span>
+        </div>
+
         <div class="d-flex justify-content-between border-bottom py-2 small">
           <span class="text-muted">
             <span class="d-inline-block rounded-circle me-1" style="width:10px;height:10px;background:<?= !empty($s['usi_verified']) ? ($byRegistry ? '#2e7d32' : '#f0ad4e') : '#E53935' ?>"></span>
@@ -111,10 +127,52 @@ $byRegistry = ($s['usi_verified_method'] ?? '') === 'registry';
             <?php endif; ?>
           </span>
         </div>
+
+        <div class="d-flex justify-content-between border-bottom py-2 small">
+          <span class="text-muted">Username</span>
+          <span class="fw-semibold text-end"><?= e($s['email'] ?: '—') ?>
+            <div class="text-muted fw-normal" style="font-size:.7rem;">students log in with their email address</div>
+          </span>
+        </div>
+
+        <div class="d-flex justify-content-between border-bottom py-2 small">
+          <span class="text-muted">Last login</span>
+          <span class="fw-semibold text-end">
+            <?php if (!empty($s['last_login_at'])): ?>
+              <?= e($stamp((string)$s['last_login_at'])) ?>
+            <?php else: ?>
+              <span class="text-danger">never logged in</span>
+            <?php endif; ?>
+          </span>
+        </div>
+
+        <!-- The things the office actually does from this screen, in one place. -->
+        <div class="d-flex flex-wrap gap-2 mt-3">
+          <?php if (!empty($s['email'])): ?>
+            <a href="?r=student_send_access&id=<?= (int)$s['id'] ?>" class="btn btn-sm btn-anb"
+               onclick="return confirm('Email portal access (login + password) to <?= e($s['email']) ?>?')">
+              <i class="bi bi-envelope"></i> Send portal access
+            </a>
+          <?php endif; ?>
+          <a href="<?= e($tabUrl('password')) ?>" class="btn btn-sm btn-outline-secondary">
+            <i class="bi bi-key"></i> Set temporary password
+          </a>
+          <?php if (!empty($s['usi_number']) && empty($s['usi_verified'])): ?>
+            <a href="?r=usi_fix&id=<?= (int)$s['id'] ?>" class="btn btn-sm btn-outline-danger">
+              <i class="bi bi-patch-check"></i> Verify USI
+            </a>
+          <?php endif; ?>
+          <a href="?r=enrol_new&student_id=<?= (int)$s['id'] ?>" class="btn btn-sm btn-outline-secondary">
+            <i class="bi bi-journal-plus"></i> Quick enrol
+          </a>
+          <a href="<?= e($tabUrl('edit')) ?>" class="btn btn-sm btn-outline-secondary">
+            <i class="bi bi-pencil"></i> Edit details
+          </a>
+        </div>
       </div>
     </div>
 
-    <div class="col-lg-6">
+    <div class="col-xl-5 col-lg-4">
       <div class="card p-3 mb-3">
         <div class="d-flex justify-content-between align-items-center mb-2">
           <h6 class="fw-bold mb-0">Staff Notes</h6>
@@ -130,7 +188,7 @@ $byRegistry = ($s['usi_verified_method'] ?? '') === 'registry';
         <?php endforeach; endif; ?>
       </div>
 
-      <div class="card p-3">
+      <div class="card p-3 mb-3">
         <h6 class="fw-bold mb-2">Completions</h6>
         <?php if (!$certs): ?>
           <div class="text-muted small">No recent training completions recorded.</div>
@@ -142,6 +200,25 @@ $byRegistry = ($s['usi_verified_method'] ?? '') === 'registry';
             </div>
           <?php endforeach; ?>
           <a class="small mt-2" href="<?= e($tabUrl('records')) ?>">All records</a>
+        <?php endif; ?>
+      </div>
+
+      <div class="card p-3">
+        <h6 class="fw-bold mb-2">Enrolments</h6>
+        <?php if (!$enrolments): ?>
+          <div class="text-muted small">Not enrolled in anything.</div>
+        <?php else: foreach (array_slice($enrolments, 0, 5) as $en): ?>
+          <div class="d-flex justify-content-between border-bottom py-2 small">
+            <span>
+              <span class="fw-semibold"><?= e((string)$en['course_code']) ?></span>
+              <div class="text-muted" style="font-size:.72rem;">
+                <?= !empty($en['sched_date']) ? e((string)$en['sched_date']) : 'not in a class' ?>
+              </div>
+            </span>
+            <span><?= status_badge($en['status']) ?></span>
+          </div>
+        <?php endforeach; ?>
+          <a class="small mt-2" href="<?= e($tabUrl('enrolments')) ?>">All enrolments</a>
         <?php endif; ?>
       </div>
     </div>
@@ -365,68 +442,72 @@ $byRegistry = ($s['usi_verified_method'] ?? '') === 'registry';
 
 <?php /* ------------------------------------------------------------ PASSWORD */ ?>
 <?php elseif ($tab === 'password'): ?>
-  <?php $justSet = $_SESSION['pw_shown'] ?? null; unset($_SESSION['pw_shown']); ?>
-  <div class="card p-3" style="max-width:720px;">
-    <h6 class="fw-bold mb-2">Student portal password</h6>
-    <p class="small text-muted">
-      This is the password <?= e(trim($s['first_name'].' '.$s['last_name'])) ?> uses to log in at
-      <a href="https://sms.anbfirstaidtraining.com.au/?r=student_login" target="_blank" rel="noopener">the student portal</a>.
-      Nobody can look up an existing password - not you, not me - because they are stored scrambled.
-      You can only give them a new one.
-    </p>
+  <?php
+    $justSet = $_SESSION['pw_shown'] ?? null; unset($_SESSION['pw_shown']);
+    require_once __DIR__ . '/../lib/student_portal.php';
+    $suggested = sp_friendly_pw();
+    $who = trim($s['first_name'].' '.$s['last_name']);
+  ?>
+  <div class="card p-3" style="max-width:760px;">
+    <h6 class="fw-bold mb-3">Set temporary password</h6>
+
+    <div class="row small mb-3">
+      <div class="col-sm-6">
+        <div class="d-flex justify-content-between border-bottom py-1">
+          <span class="text-muted">Name</span><span class="fw-semibold"><?= e($who) ?></span></div>
+        <div class="d-flex justify-content-between border-bottom py-1">
+          <span class="text-muted">ID</span><span class="fw-semibold"><?= (int)$s['id'] ?></span></div>
+      </div>
+      <div class="col-sm-6">
+        <div class="d-flex justify-content-between border-bottom py-1">
+          <span class="text-muted">Username</span><span class="fw-semibold"><?= e($s['email'] ?: '—') ?></span></div>
+        <div class="d-flex justify-content-between border-bottom py-1">
+          <span class="text-muted">Last login</span>
+          <span class="fw-semibold"><?= !empty($s['last_login_at'])
+            ? e(date('j M Y', strtotime((string)$s['last_login_at']))) : 'never' ?></span></div>
+      </div>
+    </div>
 
     <?php if ($justSet): ?>
       <div class="alert alert-success">
-        <div class="small">New password for <?= e($s['email'] ?: 'this student') ?>:</div>
+        <div class="small">New password for <?= e($who) ?>:</div>
         <div class="fs-4 fw-bold" style="letter-spacing:.05em;"><?= e($justSet) ?></div>
         <div class="small mt-1">Write it down or read it out now - it will not be shown again.</div>
       </div>
     <?php endif; ?>
 
-    <div class="row g-3">
-      <div class="col-md-6">
-        <div class="border rounded p-3 h-100">
-          <div class="fw-bold small mb-1">Email them a new one</div>
-          <p class="small text-muted">
-            Generates a new password and emails it with the login link, using your
-            "Student Portal Access" template.
-          </p>
-          <?php if (!empty($s['email'])): ?>
-            <form method="post" action="?r=student_pw"
-                  onsubmit="return confirm('Email a new password to <?= e($s['email']) ?>? Their current one stops working straight away.')">
-              <input type="hidden" name="id" value="<?= (int)$s['id'] ?>">
-              <input type="hidden" name="mode" value="email">
-              <button class="btn btn-anb btn-sm"><i class="bi bi-envelope"></i> Email a new password</button>
-            </form>
-            <div class="small text-muted mt-2">Goes to <?= e($s['email']) ?></div>
-          <?php else: ?>
-            <div class="small text-danger">No email address on file - use the option on the right.</div>
-          <?php endif; ?>
-        </div>
+    <form method="post" action="?r=student_pw"
+          onsubmit="return confirm('Change this password now? Their current one stops working straight away.')">
+      <input type="hidden" name="id" value="<?= (int)$s['id'] ?>">
+
+      <label class="form-label small fw-bold mb-1">New temporary password</label>
+      <input class="form-control" name="password" required minlength="6" autocomplete="off"
+             value="<?= e($suggested) ?>">
+      <div class="form-text">
+        This is the password the student will use to log in. One has been suggested - change it if
+        you like. It is shown on screen once after saving so you can read it out.
       </div>
 
-      <div class="col-md-6">
-        <div class="border rounded p-3 h-100">
-          <div class="fw-bold small mb-1">Set one now</div>
-          <p class="small text-muted">
-            For a student on the phone or at the desk, or one whose email has stopped working.
-            It is shown on screen once so you can read it out.
-          </p>
-          <form method="post" action="?r=student_pw"
-                onsubmit="return confirm('Change this student\'s password now?')">
-            <input type="hidden" name="id" value="<?= (int)$s['id'] ?>">
-            <input type="hidden" name="mode" value="set">
-            <input class="form-control form-control-sm mb-2" name="password" required minlength="6"
-                   placeholder="at least 6 characters" autocomplete="off">
-            <button class="btn btn-outline-secondary btn-sm"><i class="bi bi-key"></i> Set this password</button>
-          </form>
+      <?php if (!empty($s['email'])): ?>
+        <div class="form-check mt-3">
+          <input class="form-check-input" type="checkbox" name="notify" id="notify" value="1" checked>
+          <label class="form-check-label small" for="notify">
+            Email it to <?= e($who) ?> at <?= e($s['email']) ?> as well
+          </label>
         </div>
-      </div>
-    </div>
+      <?php else: ?>
+        <div class="alert alert-warning py-2 small mt-3 mb-0">
+          No email address on file, so it cannot be emailed - you will need to read it out.
+        </div>
+      <?php endif; ?>
+
+      <button class="btn btn-anb mt-3"><i class="bi bi-key"></i> Change password</button>
+    </form>
 
     <p class="small text-muted mt-3 mb-0">
-      Students can also reset it themselves - there is a "forgotten password" link on the portal
-      login page that emails them a new one, so most of the time nobody needs to ring you.
+      Nobody can look up an existing password, including me - they are stored scrambled, which is
+      how it should be. You can only issue a new one. Students can also reset it themselves with
+      the "forgotten password" link on the portal login page.
       <?php if (!empty($s['portal_emailed_at'])): ?>
         <br>Portal access was last sent to this student on <?= e((string)$s['portal_emailed_at']) ?>.
       <?php endif; ?>

@@ -10,6 +10,19 @@ function sp_schema(PDO $pdo): void {
     // When a send fails we must never fail silently again - record the attempt and the reason.
     if (!in_array('portal_attempted_at', $cols, true)) $pdo->exec("ALTER TABLE students ADD COLUMN portal_attempted_at TEXT");
     if (!in_array('portal_error', $cols, true))        $pdo->exec("ALTER TABLE students ADD COLUMN portal_error TEXT");
+    // The office asks "have they even logged in yet?" constantly - it is the
+    // difference between chasing a student and chasing an email problem.
+    if (!in_array('last_login_at', $cols, true))       $pdo->exec("ALTER TABLE students ADD COLUMN last_login_at TEXT");
+}
+
+/**
+ * A password a person can read down the phone without spelling every letter.
+ * Word + number beats nine random characters when it has to be dictated.
+ */
+function sp_friendly_pw(): string {
+    $words = ['jellyfish','kangaroo','bandage','compass','harbour','lantern','pelican',
+              'quokka','rosella','sandpit','tugboat','wattle','anchor','biscuit'];
+    return $words[random_int(0, count($words) - 1)] . random_int(100, 999);
 }
 
 function sp_genpw(): string {
@@ -29,14 +42,19 @@ function sp_login_url(): string { return 'https://sms.anbfirstaidtraining.com.au
 
 // Send the Student Portal Access email to a student. Generates a fresh password.
 // Returns [bool ok, string message].
-function sp_send_portal(PDO $pdo, array $student): array {
+/**
+ * @param ?string $plain Use this password instead of generating one. Lets the
+ *   office set a password AND email the same one, rather than the email
+ *   quietly replacing what they just read out to the student.
+ */
+function sp_send_portal(PDO $pdo, array $student, ?string $plain = null): array {
     sp_schema($pdo);
     $sid = (int)$student['id'];
     if (empty($student['email']) || strpos($student['email'], '@') === false) {
         sp_record_attempt($pdo, $sid, false, 'No valid email on file');
         return [false, 'No valid email on file'];
     }
-    $plain = sp_set_password($pdo, $sid);
+    $plain = sp_set_password($pdo, $sid, $plain);
     $vars = [
         'first_name' => $student['first_name'] ?? '',
         'last_name'  => $student['last_name'] ?? '',
