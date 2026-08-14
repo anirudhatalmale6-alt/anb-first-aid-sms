@@ -23,8 +23,10 @@ $groups = [
   ['label' => 'Learning',  'tab' => 'learning'],
   ['label' => 'Activity',  'tab' => 'activity'],
   ['label' => 'Records',   'tab' => 'records'],
-  ['label' => 'Training',  'tab' => 'training'],
-  ['label' => 'Financial', 'tab' => 'financial'],
+  ['label' => 'Training',  'children' => ['upcoming' => 'Upcoming', 'bookings' => 'Bookings',
+                                          'enrolments' => 'Enrolments', 'classes' => 'Classes',
+                                          'pipelines' => 'Occurrence Pipelines']],
+  ['label' => 'Financial', 'children' => ['invoices' => 'Invoices', 'payments' => 'Payments']],
 ];
 $byRegistry = ($s['usi_verified_method'] ?? '') === 'registry';
 ?>
@@ -533,8 +535,8 @@ $byRegistry = ($s['usi_verified_method'] ?? '') === 'registry';
     <?php endif; ?>
   </div>
 
-<?php /* ------------------------------------------------------------ TRAINING */ ?>
-<?php elseif ($tab === 'training'): ?>
+<?php /* ----------------------------------------------- TRAINING > ENROLMENTS */ ?>
+<?php elseif ($tab === 'enrolments'): ?>
   <div class="card p-3">
     <h6 class="fw-bold mb-2">Enrolments</h6>
     <table class="table table-sm align-middle mb-0">
@@ -575,8 +577,204 @@ $byRegistry = ($s['usi_verified_method'] ?? '') === 'registry';
     </table>
   </div>
 
-<?php /* ----------------------------------------------------------- FINANCIAL */ ?>
-<?php elseif ($tab === 'financial'): ?>
+<?php /* ------------------------------------------------- TRAINING > UPCOMING */ ?>
+<?php elseif ($tab === 'upcoming'): ?>
+  <?php
+    $today = date('Y-m-d');
+    $soon  = array_values(array_filter($classes, fn($c) => (string)$c['start_date'] >= $today));
+  ?>
+  <div class="card p-3">
+    <h6 class="fw-bold mb-2">Upcoming training</h6>
+    <?php if (!$soon): ?>
+      <div class="text-muted small">
+        Nothing booked ahead. Everything this student has done is under
+        <a href="<?= e($tabUrl('classes')) ?>">Classes</a>.
+      </div>
+    <?php else: ?>
+      <table class="table table-sm align-middle mb-0">
+        <thead><tr><th>When</th><th>Course</th><th>Location</th><th>Trainer</th><th>Ready?</th><th></th></tr></thead>
+        <tbody>
+        <?php foreach ($soon as $c):
+          $ready = $c['online_complete'] && $c['payment_status']==='paid' && $c['id_confirmed']
+                && $c['attendance_marked'] && $c['tasks_satisfactory']; ?>
+          <tr>
+            <td class="small fw-semibold"><?= e(date('D j M Y', strtotime((string)$c['start_date']))) ?>
+              <div class="text-muted fw-normal" style="font-size:.72rem;">
+                <?= e(substr((string)$c['start_time'],0,5)) ?><?= $c['end_time'] ? '–'.e(substr((string)$c['end_time'],0,5)) : '' ?>
+              </div></td>
+            <td class="small"><?= e((string)$c['course_code']) ?></td>
+            <td class="small text-muted"><?= e((string)($c['location'] ?: '—')) ?></td>
+            <td class="small text-muted"><?= e((string)($c['trainer_name'] ?: 'unassigned')) ?></td>
+            <td><span class="badge text-bg-<?= $ready ? 'success' : 'warning' ?>"><?= $ready ? 'Ready' : 'Pending' ?></span></td>
+            <td class="text-end">
+              <a class="btn btn-sm btn-outline-secondary py-0" href="?r=pipeline&schedule_id=<?= (int)$c['sched_id'] ?>">Open class</a>
+            </td>
+          </tr>
+        <?php endforeach; ?>
+        </tbody>
+      </table>
+    <?php endif; ?>
+  </div>
+
+<?php /* ------------------------------------------------- TRAINING > BOOKINGS */ ?>
+<?php elseif ($tab === 'bookings'): ?>
+  <div class="card p-3" style="max-width:820px;">
+    <h6 class="fw-bold mb-2">Bookings</h6>
+    <?php if (!$bookings): ?>
+      <p class="text-muted small mb-0">
+        No group booking against this student. Group bookings are where a company books a course
+        for its staff - they are matched on the booking contact's email address, so a student
+        booked under someone else's email will not show here. Their own enrolments are under
+        <a href="<?= e($tabUrl('enrolments')) ?>">Enrolments</a>.
+      </p>
+    <?php else: ?>
+      <table class="table table-sm align-middle mb-0">
+        <thead><tr><th>Booking</th><th>Contact</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+        <?php foreach ($bookings as $b): ?>
+          <tr>
+            <td class="small fw-semibold">#<?= (int)$b['id'] ?>
+              <div class="text-muted fw-normal"><?= e((string)($b['company_name'] ?? '')) ?></div></td>
+            <td class="small text-muted"><?= e((string)($b['contact_email'] ?? '')) ?></td>
+            <td class="small"><?= e((string)($b['status'] ?? '')) ?></td>
+            <td class="text-end">
+              <a class="btn btn-sm btn-outline-secondary py-0" href="?r=group_booking_view&id=<?= (int)$b['id'] ?>">Open</a>
+            </td>
+          </tr>
+        <?php endforeach; ?>
+        </tbody>
+      </table>
+    <?php endif; ?>
+  </div>
+
+<?php /* -------------------------------------------------- TRAINING > CLASSES */ ?>
+<?php elseif ($tab === 'classes'): ?>
+  <div class="card p-3">
+    <h6 class="fw-bold mb-2">Classes</h6>
+    <?php if (!$classes): ?>
+      <div class="text-muted small">
+        This student is not attached to any class. Most migrated students are not - their training
+        came across as history without a class record.
+      </div>
+    <?php else: ?>
+      <table class="table table-sm align-middle mb-0">
+        <thead><tr><th>Date</th><th>Time</th><th>Course</th><th>Location</th><th>Trainer</th><th>Class size</th><th></th></tr></thead>
+        <tbody>
+        <?php foreach ($classes as $c): ?>
+          <tr>
+            <td class="small fw-semibold"><?= e(date('D j M Y', strtotime((string)$c['start_date']))) ?></td>
+            <td class="small text-muted"><?= e(substr((string)$c['start_time'],0,5)) ?><?= $c['end_time'] ? '–'.e(substr((string)$c['end_time'],0,5)) : '' ?></td>
+            <td class="small"><?= e((string)$c['course_code']) ?>
+              <div class="text-muted" style="font-size:.72rem;"><?= e((string)$c['plan_title']) ?></div></td>
+            <td class="small text-muted"><?= e((string)($c['location'] ?: '—')) ?></td>
+            <td class="small text-muted"><?= e((string)($c['trainer_name'] ?: 'unassigned')) ?></td>
+            <td class="small text-muted"><?= (int)$c['booked'] ?><?= $c['total_places'] !== null ? ' / '.(int)$c['total_places'] : '' ?></td>
+            <td class="text-end">
+              <a class="btn btn-sm btn-outline-secondary py-0" href="?r=pipeline&schedule_id=<?= (int)$c['sched_id'] ?>">Open class</a>
+            </td>
+          </tr>
+        <?php endforeach; ?>
+        </tbody>
+      </table>
+    <?php endif; ?>
+  </div>
+
+<?php /* ---------------------------------------- TRAINING > OCCURRENCE PIPELINES */ ?>
+<?php elseif ($tab === 'pipelines'): ?>
+  <div class="card p-3">
+    <h6 class="fw-bold mb-2">Occurrence pipelines</h6>
+    <p class="small text-muted">
+      Where this student sits in each of their classes - the same checks the class pipeline runs,
+      but for them alone. Green means done, red means outstanding.
+    </p>
+    <?php if (!$classes): ?>
+      <div class="text-muted small">This student is not attached to any class.</div>
+    <?php else: ?>
+      <?php
+        $pdot = function (bool $ok, string $title): string {
+            return '<span class="d-inline-block rounded-circle" title="'.htmlspecialchars($title, ENT_QUOTES).'"'
+                 . ' style="width:14px;height:14px;background:'.($ok ? '#2e7d32' : '#E53935').'"></span>';
+        };
+      ?>
+      <table class="table table-sm align-middle mb-0">
+        <thead><tr>
+          <th>Class</th><th class="text-center">Online</th><th class="text-center">USI</th>
+          <th class="text-center">Paid</th><th class="text-center">ID</th>
+          <th class="text-center">Attend.</th><th class="text-center">Tasks</th><th></th>
+        </tr></thead>
+        <tbody>
+        <?php foreach ($classes as $c): ?>
+          <tr>
+            <td class="small fw-semibold"><?= e(date('D j M Y', strtotime((string)$c['start_date']))) ?>
+              <div class="text-muted fw-normal" style="font-size:.72rem;"><?= e((string)$c['course_code']) ?><?= $c['location'] ? ' · '.e((string)$c['location']) : '' ?></div></td>
+            <td class="text-center"><?= $pdot((bool)$c['online_complete'], 'Online modules') ?></td>
+            <td class="text-center"><?= $pdot(!empty($s['usi_verified']), 'USI verified') ?></td>
+            <td class="text-center"><?= $pdot($c['payment_status']==='paid', 'Paid') ?></td>
+            <td class="text-center"><?= $pdot((bool)$c['id_confirmed'], 'ID sighted') ?></td>
+            <td class="text-center">
+              <?= $pdot((bool)$c['attendance_marked'], (string)($c['attendance_status'] ?: 'not marked')) ?>
+              <?php if ((string)($c['attendance_status'] ?? '') === 'absent'): ?>
+                <div class="text-danger" style="font-size:.62rem;">absent</div>
+              <?php endif; ?>
+            </td>
+            <td class="text-center">
+              <?= $pdot((bool)$c['tasks_satisfactory'], (string)($c['tasks_status'] ?: 'not assessed')) ?>
+              <?php if ((string)($c['tasks_status'] ?? '') === 'not_yet'): ?>
+                <div class="text-danger" style="font-size:.62rem;">not yet</div>
+              <?php endif; ?>
+            </td>
+            <td class="text-end">
+              <a class="btn btn-sm btn-outline-secondary py-0" href="?r=pipeline&schedule_id=<?= (int)$c['sched_id'] ?>">Open pipeline</a>
+            </td>
+          </tr>
+        <?php endforeach; ?>
+        </tbody>
+      </table>
+    <?php endif; ?>
+  </div>
+
+<?php /* ------------------------------------------------ FINANCIAL > PAYMENTS */ ?>
+<?php elseif ($tab === 'payments'): ?>
+  <?php
+    $paidRows = array_values(array_filter($financial, fn($f) => (float)$f['amount_paid'] > 0));
+    $tot = 0.0; foreach ($paidRows as $f) $tot += (float)$f['amount_paid'];
+  ?>
+  <div class="card p-3" style="max-width:820px;">
+    <h6 class="fw-bold mb-2">Payments received</h6>
+    <?php if (!$paidRows): ?>
+      <p class="text-muted small mb-0">
+        Nothing recorded as received for this student.
+      </p>
+    <?php else: ?>
+      <table class="table table-sm align-middle mb-2">
+        <thead><tr><th>Course</th><th>Date</th><th>Received</th><th></th></tr></thead>
+        <tbody>
+        <?php foreach ($paidRows as $f): ?>
+          <tr>
+            <td class="small fw-semibold"><?= e((string)$f['course_code']) ?>
+              <div class="text-muted fw-normal"><?= e((string)$f['plan_title']) ?></div></td>
+            <td class="small text-muted"><?= e((string)$f['start_date']) ?></td>
+            <td class="small">$<?= number_format((float)$f['amount_paid'],2) ?></td>
+            <td class="text-end">
+              <a class="btn btn-sm btn-outline-secondary py-0" target="_blank" rel="noopener"
+                 href="?r=receipt&enrolment_id=<?= (int)$f['id'] ?>"><i class="bi bi-receipt"></i> Receipt link</a>
+            </td>
+          </tr>
+        <?php endforeach; ?>
+        </tbody>
+      </table>
+      <div class="fw-bold">Total received: $<?= number_format($tot,2) ?></div>
+    <?php endif; ?>
+    <p class="small text-muted mt-3 mb-0">
+      This is the amount recorded against each enrolment, not a list of individual transactions.
+      Card payments are taken by the website's checkout and the transaction detail stays with
+      Stripe - the SMS only knows how much was paid, not when or by which card. Recording
+      part-payments, refunds and payments taken over the phone is the invoicing job we discussed.
+    </p>
+  </div>
+
+<?php /* ------------------------------------------------ FINANCIAL > INVOICES */ ?>
+<?php elseif ($tab === 'invoices'): ?>
   <?php
     $due = 0.0; $paid = 0.0;
     foreach ($financial as $f) { $due += (float)$f['amount_due']; $paid += (float)$f['amount_paid']; }
@@ -606,7 +804,7 @@ $byRegistry = ($s['usi_verified_method'] ?? '') === 'registry';
               <a class="btn btn-sm btn-outline-secondary py-0" target="_blank" rel="noopener"
                  href="?r=receipt&enrolment_id=<?= (int)$f['id'] ?>"
                  title="<?= $f['payment_status']==='paid' ? 'Receipt' : 'Tax invoice - this one is not marked paid' ?>">
-                <i class="bi bi-receipt"></i> <?= $f['payment_status']==='paid' ? 'Receipt' : 'Invoice' ?>
+                <i class="bi bi-receipt"></i> Receipt link
               </a>
             </td>
           </tr>

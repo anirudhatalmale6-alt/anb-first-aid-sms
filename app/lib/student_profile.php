@@ -185,3 +185,55 @@ function sp_learning_by_course(PDO $pdo, int $studentId): array {
     }
     return $out;
 }
+
+/**
+ * The classes this student is in, one row per class, with their own readiness
+ * inside each - the same seven gates the class pipeline shows, but for this
+ * student only.
+ *
+ * @return array<int,array<string,mixed>>
+ */
+function sp_classes(PDO $pdo, int $studentId): array {
+    // attendance_status / tasks_status are added by pipe_schema(), which only
+    // runs on the pipeline routes - make sure they exist before selecting them.
+    require_once __DIR__ . '/pipeline.php';
+    pipe_schema($pdo);
+
+    $q = $pdo->prepare("SELECT e.id enrolment_id, e.status, e.payment_status,
+               e.online_complete, e.id_confirmed, e.attendance_marked, e.tasks_satisfactory,
+               e.attendance_status, e.tasks_status,
+               sc.id sched_id, sc.start_date, sc.start_time, sc.end_time, sc.total_places,
+               co.code course_code, co.title course_title, p.title plan_title,
+               l.name location, u.name trainer_name,
+               (SELECT COUNT(*) FROM enrolments e2 WHERE e2.schedule_id=sc.id) booked
+        FROM enrolments e
+        JOIN schedules sc ON sc.id = e.schedule_id
+        JOIN courses co ON co.id = e.course_id
+        JOIN plans p ON p.id = e.plan_id
+        LEFT JOIN locations l ON l.id = sc.location_id
+        LEFT JOIN users u ON u.id = sc.trainer_id
+        WHERE e.student_id = ?
+        ORDER BY sc.start_date DESC");
+    $q->execute([$studentId]);
+    return $q->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/**
+ * Group bookings this student was brought in on - a company booking a course
+ * for its staff, rather than the student booking themselves.
+ *
+ * @return array<int,array<string,mixed>>
+ */
+function sp_bookings(PDO $pdo, int $studentId): array {
+    $has = $pdo->query("SELECT name FROM sqlite_master WHERE type='table' AND name='group_bookings'")->fetchColumn();
+    if (!$has) return [];
+    // The link between a group booking and a student is the email it was made
+    // against; there is no student_id on the booking.
+    $email = (string)($pdo->query("SELECT email FROM students WHERE id=".(int)$studentId)->fetchColumn() ?: '');
+    if ($email === '') return [];
+    $cols = $pdo->query("PRAGMA table_info(group_bookings)")->fetchAll(PDO::FETCH_COLUMN, 1);
+    if (!in_array('contact_email', $cols, true)) return [];
+    $q = $pdo->prepare("SELECT * FROM group_bookings WHERE contact_email=? ORDER BY id DESC");
+    $q->execute([$email]);
+    return $q->fetchAll(PDO::FETCH_ASSOC);
+}
