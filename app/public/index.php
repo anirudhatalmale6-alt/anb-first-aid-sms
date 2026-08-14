@@ -729,6 +729,44 @@ case 'student_quiz_reset':
     redirect('?r=student&id='.$id.'&tab=activity');
     break;
 
+/** Compose an email to one student from any saved template. */
+case 'student_email':
+    require_once __DIR__.'/../lib/student_email.php';
+    se_schema($pdo);
+    $id = (int)($_GET['id'] ?? 0);
+    $st = $pdo->prepare("SELECT * FROM students WHERE id=?"); $st->execute([$id]); $s = $st->fetch();
+    if (!$s) { http_response_code(404); echo 'Not found'; break; }
+    $templates = se_templates($pdo);
+    $vars      = se_vars($pdo, $s);
+    $history   = se_history($pdo, $id);
+    $pick      = trim((string)($_GET['tpl'] ?? ''));
+    $draft     = ['subject' => '', 'body' => ''];
+    foreach ($templates as $t) {
+        if ((string)$t['name'] === $pick) {
+            $draft = ['subject' => anb_merge((string)$t['subject'], $vars),
+                      'body'    => anb_merge((string)$t['body'], $vars)];
+        }
+    }
+    render('student_email', compact('s','templates','vars','history','pick','draft'), 'Email student');
+    break;
+
+case 'student_email_send':
+    require_once __DIR__.'/../lib/student_email.php';
+    $id = (int)($_POST['id'] ?? 0);
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !$id) redirect('?r=students');
+    $st = $pdo->prepare("SELECT * FROM students WHERE id=?"); $st->execute([$id]); $s = $st->fetch();
+    if (!$s) { http_response_code(404); echo 'Not found'; break; }
+    $u = current_user();
+    [$ok, $msg] = se_send($pdo, $s,
+        (string)($_POST['template'] ?? ''),
+        (string)($_POST['subject'] ?? ''),
+        (string)($_POST['body'] ?? ''),
+        (string)($u['name'] ?? $u['email'] ?? ''));
+    $_SESSION['flash'] = $msg;
+    if (!$ok) $_SESSION['flash_error'] = 1;
+    redirect('?r=student_email&id='.$id);
+    break;
+
 case 'student_note_add':
     require_once __DIR__.'/../lib/student_profile.php';
     $id = (int)($_POST['id'] ?? 0);

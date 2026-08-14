@@ -35,7 +35,7 @@ function role_routes(string $role): array {
       // name repair: office can look at what the registry found, but saving a
       // change to 164 student records is an administrator action
       'usi_registry','usi_registry_test','usi_check','usi_bulk','usi_bulk_step','usi_bulk_csv',
-      'usi_repair','usi_repair_step','usi_fix','usi_fix_save','student_note_add','receipt','student_pw','student_quiz_reset','reminders_preview','reminders_send_one','reminders_booking'];
+      'usi_repair','usi_repair_step','usi_fix','usi_fix_save','student_note_add','receipt','student_pw','student_quiz_reset','reminders_preview','reminders_send_one','reminders_booking','student_email','student_email_send'];
     $trainer = ['dashboard','trainer','students','student','schedules','pipeline','pipe_mark','class_send_access','obs_list','obs_mark','obs_save',
       'form_subs','form_view','content','quiz_edit','signoff','generate','cert','usi_verify','usi_check','usi_fix','usi_fix_save',
       'my_trainer','my_trainer_save','my_trainer_qual','my_trainer_declare','my_trainer_insurance',

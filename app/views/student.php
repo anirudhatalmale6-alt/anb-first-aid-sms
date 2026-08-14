@@ -154,6 +154,11 @@ $byRegistry = ($s['usi_verified_method'] ?? '') === 'registry';
               <i class="bi bi-envelope"></i> Send portal access
             </a>
           <?php endif; ?>
+          <?php if (!empty($s['email'])): ?>
+            <a href="?r=student_email&id=<?= (int)$s['id'] ?>" class="btn btn-sm btn-outline-secondary">
+              <i class="bi bi-envelope-paper"></i> Send an email
+            </a>
+          <?php endif; ?>
           <a href="<?= e($tabUrl('password')) ?>" class="btn btn-sm btn-outline-secondary">
             <i class="bi bi-key"></i> Set temporary password
           </a>
