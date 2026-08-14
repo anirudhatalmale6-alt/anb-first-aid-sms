@@ -122,7 +122,12 @@ function rem_send_one(PDO $pdo, array $row, bool $dryRun = true): array {
         'course'      => (string)$row['course_code'] . ' - ' . (string)$row['course_title'],
         'expiry_date' => date('d-m-Y', strtotime((string)$row['expiry_date'])),
         'days_left'   => (string)(int)$row['days_left'],
-        'booking_url' => rem_config($pdo)['booking_url'],
+        // Both spellings on purpose. The Email Templates page offers
+        // {booking_link} and the saved template uses it, but this code was
+        // written with {booking_url} - so the student's email contained the
+        // literal text "{booking_link}" and no link at all.
+        'booking_url'  => rem_config($pdo)['booking_url'],
+        'booking_link' => rem_config($pdo)['booking_url'],
     ];
 
     $tpl = $pdo->query("SELECT subject, body FROM email_templates WHERE name='Renewal Reminder' LIMIT 1")
@@ -139,7 +144,7 @@ function rem_send_one(PDO $pdo, array $row, bool $dryRun = true): array {
         return [true, 'Would email ' . $name . ' <' . $row['email'] . '> - ' . $subject];
     }
 
-    [$ok, $err] = anb_send_mail($pdo, (string)$row['email'], $subject, nl2br(e($bodyTxt)));
+    [$ok, $err] = anb_send_mail($pdo, (string)$row['email'], $subject, anb_body_html($bodyTxt));
     if ($ok) {
         $pdo->prepare("UPDATE certificates SET $col=? WHERE id=?")
             ->execute([date('Y-m-d H:i:s'), (int)$row['id']]);

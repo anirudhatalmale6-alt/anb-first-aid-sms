@@ -78,7 +78,7 @@ function sp_send_portal(PDO $pdo, array $student, ?string $plain = null): array 
                  . "Kind regards,\nA&B First Aid Training";
         $subject = anb_merge($subject, $vars); $body = anb_merge($body, $vars);
     }
-    $html = nl2br(htmlspecialchars($body, ENT_QUOTES, 'UTF-8'));
+    $html = anb_body_html($body);   // the login link has to be clickable
     [$ok, $msg] = anb_send_mail($pdo, $student['email'], $subject, $html);
     sp_record_attempt($pdo, $sid, $ok, $msg);
     return [$ok, $msg];

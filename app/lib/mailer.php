@@ -194,3 +194,43 @@ function anb_mime_header(string $s): string {
 function anb_mime_name(string $s): string {
     return preg_match('/[^\x20-\x7e]/', $s) ? anb_mime_header($s) : '"' . str_replace('"', '', $s) . '"';
 }
+
+/**
+ * Turn a plain-text email body into the HTML we actually send.
+ *
+ * Every sender was doing nl2br(htmlspecialchars($body)) which is safe but
+ * leaves a web address as dead text - the reader sees the link and cannot
+ * click it. That affected the renewal reminder, the certificate email and,
+ * worst of all, the portal access email, where the whole point is that the
+ * student clicks through and logs in.
+ *
+ * Escape first so nothing in the body can inject markup, then linkify, then
+ * break the lines - in that order, or the anchors we add get escaped too.
+ */
+function anb_body_html(string $text): string {
+    $safe = htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
+
+    // Trailing punctuation is part of the sentence, not the address.
+    $safe = preg_replace_callback(
+        '#\bhttps?://[^\s<>"]+#i',
+        static function (array $m): string {
+            $url = $m[0];
+            $tail = '';
+            while ($url !== '' && strpos('.,;:!?)', substr($url, -1)) !== false) {
+                $tail = substr($url, -1) . $tail;
+                $url  = substr($url, 0, -1);
+            }
+            return '<a href="' . $url . '" target="_blank" rel="noopener">' . $url . '</a>' . $tail;
+        },
+        $safe
+    ) ?? $safe;
+
+    // Bare email addresses are worth making clickable too.
+    $safe = preg_replace(
+        '#(?<!["\'>])\b([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\b#',
+        '<a href="mailto:$1">$1</a>',
+        $safe
+    ) ?? $safe;
+
+    return nl2br($safe);
+}

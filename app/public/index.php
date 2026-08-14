@@ -1610,7 +1610,7 @@ case 'cert_email':
     ];
     $subject = anb_merge($tpl['subject'] ?? 'Your certificate from A&B First Aid Training', $vars);
     $bodyTxt = anb_merge($tpl['body'] ?? "Hi {first_name},\n\nYour certificate {certificate_number} is attached.\n\nA&B First Aid Training", $vars);
-    $bodyHtml = nl2br(e($bodyTxt));
+    $bodyHtml = anb_body_html($bodyTxt);   // links must be clickable, not printed
     [$ok,$err] = anb_send_mail($pdo, $cert['email'], $subject, $bodyHtml,
         [['path'=>$pdfPath, 'name'=>$cert['certificate_number'].'.pdf']]);
     if ($ok) {
