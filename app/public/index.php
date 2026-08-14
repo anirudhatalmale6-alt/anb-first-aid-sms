@@ -545,8 +545,14 @@ case 'student':
     $id = (int)($_GET['id'] ?? 0);
     $st = $pdo->prepare("SELECT * FROM students WHERE id=?"); $st->execute([$id]); $s = $st->fetch();
     if (!$s) { http_response_code(404); echo 'Not found'; break; }
-    $enr = $pdo->prepare("SELECT e.*, co.title course_title, co.code course_code, p.title plan_title
+    // The class itself, so the record can link through to the pipeline rather
+    // than being a dead end that only says which course they booked.
+    $enr = $pdo->prepare("SELECT e.*, co.title course_title, co.code course_code, p.title plan_title,
+               sc.id sched_id, sc.start_date sched_date, sc.start_time sched_time, sc.end_time sched_end,
+               l.name sched_location
         FROM enrolments e JOIN courses co ON co.id=e.course_id JOIN plans p ON p.id=e.plan_id
+        LEFT JOIN schedules sc ON sc.id=e.schedule_id
+        LEFT JOIN locations l ON l.id=sc.location_id
         WHERE e.student_id=? ORDER BY e.start_date DESC");
     $enr->execute([$id]); $enrolments = $enr->fetchAll();
     $cert = $pdo->prepare("SELECT c.*, co.title course_title FROM certificates c JOIN enrolments e ON e.id=c.enrolment_id JOIN courses co ON co.id=e.course_id WHERE c.student_id=? ORDER BY c.issue_date DESC");
@@ -2053,10 +2059,25 @@ case 'enrol_move':
         FROM enrolments e JOIN students s ON s.id=e.student_id JOIN courses co ON co.id=e.course_id WHERE e.id=?");
     $en->execute([$eid]); $en=$en->fetch(PDO::FETCH_ASSOC);
     if (!$en) { http_response_code(404); echo 'Not found'; break; }
-    $schedules = $pdo->query("SELECT sc.id, sc.start_date, sc.start_time, sc.plan_id, p.course_id, co.code, co.title,
-        sc.location_id, l.name loc FROM schedules sc JOIN plans p ON p.id=sc.plan_id JOIN courses co ON co.id=p.course_id
-        LEFT JOIN locations l ON l.id=sc.location_id ORDER BY sc.start_date DESC")->fetchAll(PDO::FETCH_ASSOC);
-    render('enrol_move', compact('en','schedules'), 'Move / transfer enrolment');
+    // Upcoming classes first - rescheduling is almost always forwards, and the
+    // old ordering put 300-odd finished classes at the top of the list.
+    // Seats booked comes along so nobody is moved into a full room.
+    $schedules = $pdo->query("SELECT sc.id, sc.start_date, sc.start_time, sc.plan_id, sc.total_places AS places,
+               p.course_id, co.code, co.title, sc.location_id, l.name loc,
+               (SELECT COUNT(*) FROM enrolments e2 WHERE e2.schedule_id=sc.id) booked,
+               CASE WHEN sc.start_date >= date('now') THEN 0 ELSE 1 END past
+        FROM schedules sc JOIN plans p ON p.id=sc.plan_id JOIN courses co ON co.id=p.course_id
+        LEFT JOIN locations l ON l.id=sc.location_id
+        ORDER BY past ASC, CASE WHEN sc.start_date >= date('now') THEN sc.start_date END ASC,
+                 CASE WHEN sc.start_date <  date('now') THEN sc.start_date END DESC")->fetchAll(PDO::FETCH_ASSOC);
+    $backTo = (int)($_GET['from'] ?? 0);
+    $current = null;
+    if (!empty($en['schedule_id'])) {
+        $cq = $pdo->prepare("SELECT sc.start_date, sc.start_time, l.name loc FROM schedules sc
+                             LEFT JOIN locations l ON l.id=sc.location_id WHERE sc.id=?");
+        $cq->execute([(int)$en['schedule_id']]); $current = $cq->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
+    render('enrol_move', compact('en','schedules','backTo','current'), 'Reschedule');
     break;
 
 case 'enrol_move_save':
@@ -2068,8 +2089,11 @@ case 'enrol_move_save':
         $pdo->prepare("UPDATE enrolments SET course_id=?, plan_id=?, schedule_id=?, location_id=?, start_date=?, end_date=? WHERE id=?")
             ->execute([(int)$sc['course_id'],(int)$sc['plan_id'],$schedId,$sc['location_id']?:null,$sc['start_date'],$sc['end_date'],$eid]);
         $_SESSION['flash']='Enrolment moved to the selected class/course.';
-    } catch (Throwable $e) { $_SESSION['flash']='Could not move: '.$e->getMessage(); }
-    redirect('?r=enrol_move&id='.$eid);
+    } catch (Throwable $e) { $_SESSION['flash']='Could not move: '.$e->getMessage(); $_SESSION['flash_error']=1; }
+    // Back to whoever sent us here, so a reschedule started from a student
+    // record finishes on that record.
+    $from = (int)($_POST['from'] ?? 0);
+    redirect($from ? '?r=student&id='.$from : '?r=enrol_move&id='.$eid);
     break;
 
 case 'group_bookings':

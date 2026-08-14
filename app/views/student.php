@@ -242,16 +242,41 @@
     <div class="card p-3 mb-3">
       <h6 class="fw-bold mb-2">Enrolments</h6>
       <table class="table table-sm align-middle mb-0">
-        <thead><tr><th>Course</th><th>Date</th><th>Status</th><th>Payment</th></tr></thead>
+        <thead><tr><th>Course</th><th>Class</th><th>Status</th><th>Payment</th><th></th></tr></thead>
         <tbody>
         <?php foreach ($enrolments as $en): ?>
           <tr>
             <td class="small fw-semibold"><?= e($en['course_code']) ?><div class="text-muted fw-normal"><?= e($en['course_title']) ?></div></td>
-            <td class="small"><?= e($en['start_date']) ?></td>
+            <td class="small">
+              <?php if (!empty($en['sched_id'])): ?>
+                <a href="?r=pipeline&schedule_id=<?= (int)$en['sched_id'] ?>"
+                   title="Open this class and everyone in it">
+                  <?= e((string)$en['sched_date']) ?>
+                </a>
+                <div class="text-muted" style="font-size:.72rem;">
+                  <?= e(substr((string)$en['sched_time'],0,5)) ?><?= $en['sched_end'] ? '–'.e(substr((string)$en['sched_end'],0,5)) : '' ?>
+                  <?= $en['sched_location'] ? ' · '.e((string)$en['sched_location']) : '' ?>
+                </div>
+              <?php else: ?>
+                <?= e((string)$en['start_date']) ?>
+                <div class="text-muted" style="font-size:.72rem;">not in a class</div>
+              <?php endif; ?>
+            </td>
             <td><?= status_badge($en['status']) ?></td>
             <td><span class="badge text-bg-<?= $en['payment_status']==='paid'?'success':($en['payment_status']==='part'?'warning':'secondary') ?>"><?= ucfirst($en['payment_status']) ?></span></td>
+            <td class="text-end">
+              <?php if ($en['status'] !== 'issued'): ?>
+                <a href="?r=enrol_move&id=<?= (int)$en['id'] ?>&from=<?= (int)$s['id'] ?>"
+                   class="btn btn-sm btn-outline-secondary py-0"
+                   title="Move this student to a different class or date">
+                  <i class="bi bi-calendar-event"></i> Reschedule
+                </a>
+              <?php else: ?>
+                <span class="text-muted" style="font-size:.72rem;">certificate issued</span>
+              <?php endif; ?>
+            </td>
           </tr>
-        <?php endforeach; if (!$enrolments): ?><tr><td colspan="4" class="text-muted small">No enrolments.</td></tr><?php endif; ?>
+        <?php endforeach; if (!$enrolments): ?><tr><td colspan="5" class="text-muted small">No enrolments.</td></tr><?php endif; ?>
         </tbody>
       </table>
     </div>
