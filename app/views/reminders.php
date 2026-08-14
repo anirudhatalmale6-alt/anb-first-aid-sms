@@ -50,6 +50,21 @@ $isErr = !empty($_SESSION['flash_error']); unset($_SESSION['flash_error']);
         <li>At most <strong><?= (int)$cfg['cap'] ?> emails per run</strong>, so a mistake costs a
             handful of emails rather than thousands.</li>
       </ul>
+      <div class="border rounded p-2 mb-2" style="background:#fbfbfc;">
+        <form method="post" action="?r=reminders_booking">
+          <label class="form-label small fw-bold mb-1">"Re-book here" link in the email</label>
+          <div class="input-group input-group-sm">
+            <input class="form-control" name="booking_url" value="<?= e($cfg['booking_url']) ?>">
+            <button class="btn btn-outline-secondary">Save</button>
+          </div>
+          <div class="form-text">
+            This is the address students land on when they click the link in the reminder.
+            <a href="<?= e($cfg['booking_url']) ?>" target="_blank" rel="noopener">Open it and check</a>
+            it goes where you expect.
+          </div>
+        </form>
+      </div>
+
       <?php if ($lapsed > 0): ?>
         <div class="alert alert-light border small mb-0">
           <strong><?= number_format($lapsed) ?></strong> students have a certificate that has

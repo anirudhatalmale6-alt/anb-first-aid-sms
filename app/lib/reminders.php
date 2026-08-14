@@ -35,15 +35,22 @@ function rem_schema(PDO $pdo): void {
     anb_settings_init($pdo);
 }
 
-/** @return array{on:bool,cap:int,last_run:string,last_count:int} */
+/** Where "re-book here" points. A setting, not a constant, because only the
+ *  client knows which page they want students landing on - and their own site
+ *  menu has two different Book Now links, one of which 404s. */
+const REM_BOOKING_URL_DEFAULT = 'https://www.anbfirstaidtraining.com.au/book-first-aid-course/';
+
+/** @return array{on:bool,cap:int,booking_url:string,last_run:string,last_count:int} */
 function rem_config(PDO $pdo): array {
     rem_schema($pdo);
     $s = anb_settings($pdo);
+    $url = trim((string)($s['reminders_booking_url'] ?? ''));
     return [
-        'on'         => ($s['reminders_on'] ?? '0') === '1',
-        'cap'        => max(1, (int)($s['reminders_cap'] ?? REM_CAP_DEFAULT)),
-        'last_run'   => (string)($s['reminders_last_run'] ?? ''),
-        'last_count' => (int)($s['reminders_last_count'] ?? 0),
+        'on'          => ($s['reminders_on'] ?? '0') === '1',
+        'cap'         => max(1, (int)($s['reminders_cap'] ?? REM_CAP_DEFAULT)),
+        'booking_url' => $url !== '' ? $url : REM_BOOKING_URL_DEFAULT,
+        'last_run'    => (string)($s['reminders_last_run'] ?? ''),
+        'last_count'  => (int)($s['reminders_last_count'] ?? 0),
     ];
 }
 
@@ -115,7 +122,7 @@ function rem_send_one(PDO $pdo, array $row, bool $dryRun = true): array {
         'course'      => (string)$row['course_code'] . ' - ' . (string)$row['course_title'],
         'expiry_date' => date('d-m-Y', strtotime((string)$row['expiry_date'])),
         'days_left'   => (string)(int)$row['days_left'],
-        'booking_url' => 'https://anbfirstaidtraining.com.au/book-first-aid-course/',
+        'booking_url' => rem_config($pdo)['booking_url'],
     ];
 
     $tpl = $pdo->query("SELECT subject, body FROM email_templates WHERE name='Renewal Reminder' LIMIT 1")

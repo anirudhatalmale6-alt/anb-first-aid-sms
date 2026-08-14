@@ -1703,6 +1703,25 @@ case 'reminders_preview':
     redirect('?r=reminders');
     break;
 
+/** Where the "re-book here" link in the reminder points. */
+case 'reminders_booking':
+    require_once __DIR__.'/../lib/reminders.php';
+    rem_schema($pdo);
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $url = trim((string)($_POST['booking_url'] ?? ''));
+        if ($url !== '' && !preg_match('#^https?://#i', $url)) {
+            $_SESSION['flash'] = 'That does not look like a web address - it needs to start with https://';
+            $_SESSION['flash_error'] = 1;
+        } else {
+            anb_setting_save($pdo, 'reminders_booking_url', $url);
+            $_SESSION['flash'] = $url === ''
+                ? 'Booking link reset to the default.'
+                : 'Booking link saved. Students will land on '.$url;
+        }
+    }
+    redirect('?r=reminders');
+    break;
+
 /** The on/off switch. Admin only - this one starts emailing real students. */
 case 'reminders_toggle':
     require_once __DIR__.'/../lib/reminders.php';
