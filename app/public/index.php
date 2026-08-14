@@ -495,17 +495,22 @@ case 'dashboard':
         'students'    => $pdo->query("SELECT COUNT(*) FROM students")->fetchColumn(),
         'enrolments'  => $pdo->query("SELECT COUNT(*) FROM enrolments")->fetchColumn(),
         'issued'      => $pdo->query("SELECT COUNT(*) FROM certificates")->fetchColumn(),
-        'upcoming'    => $pdo->query("SELECT COUNT(*) FROM schedules WHERE start_date>='2026-08-01'")->fetchColumn(),
+        'upcoming'    => $pdo->query("SELECT COUNT(*) FROM schedules WHERE date(start_date)>=date('now')")->fetchColumn(),
     ];
-    // certs expiring within 60 days or already expired (renewal opportunities)
+    // Who is about to fall due, soonest first. This had no lower bound and a
+    // hard-coded date, so it listed every certificate that had ever expired -
+    // the top of the list was people 685 days out of date, which is a mailing
+    // list, not a call list. The full history lives on Renewal Reminders.
     $expiring = $pdo->query("
         SELECT c.*, s.first_name, s.last_name, s.email, co.title AS course_title
         FROM certificates c
         JOIN students s ON s.id=c.student_id
         JOIN enrolments e ON e.id=c.enrolment_id
         JOIN courses co ON co.id=e.course_id
-        WHERE c.expiry_date IS NOT NULL AND date(c.expiry_date) <= date('2026-08-01','+60 day')
-        ORDER BY c.expiry_date ASC")->fetchAll();
+        WHERE c.expiry_date IS NOT NULL
+          AND date(c.expiry_date) >= date('now')
+          AND date(c.expiry_date) <= date('now','+30 day')
+        ORDER BY date(c.expiry_date) ASC")->fetchAll();
     $pending = $pdo->query("
         SELECT e.*, s.first_name, s.last_name, co.title AS course_title
         FROM enrolments e JOIN students s ON s.id=e.student_id JOIN courses co ON co.id=e.course_id
@@ -554,7 +559,7 @@ case 'dashboard':
         $cNext  = date('Y-m-d', strtotime($cStart.' +1 month'));
     }
     $sstmt = $pdo->prepare("
-        SELECT sc.start_date, sc.start_time, sc.end_time, sc.total_places,
+        SELECT sc.id, sc.start_date, sc.start_time, sc.end_time, sc.total_places,
                co.title AS course_title, co.code AS course_code, l.name AS location, u.name AS trainer_name,
                (SELECT COUNT(*) FROM enrolments e WHERE e.schedule_id=sc.id) AS booked
         FROM schedules sc

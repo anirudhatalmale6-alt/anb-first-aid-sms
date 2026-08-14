@@ -116,12 +116,17 @@
       <div class="d-flex align-items-start py-2" style="border-bottom:1px solid #f1f0f3;">
         <div class="small text-muted" style="width:118px;flex:0 0 118px;white-space:nowrap;"><?= e($tr) ?></div>
         <div class="me-2" style="margin-top:4px;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#1565c0;"></span></div>
-        <div class="small" style="color:#1565c0;line-height:1.3;">
-          <span class="fw-semibold"><?= e($ev['course_code']) ?></span> <?= e($ev['course_title']) ?><?php
-            if(!empty($ev['location'])) echo ' at '.e($ev['location']);
-            if(!empty($ev['trainer_name'])) echo ' with '.e($ev['trainer_name']);
-            if($st) echo ' at '.e($st);
-          ?>
+        <div class="small" style="line-height:1.3;">
+          <!-- The whole line is the link: this is the fastest way into a class
+               on the day, and reading a class you cannot open is no use. -->
+          <a href="?r=pipeline&schedule_id=<?= (int)$ev['id'] ?>" class="text-decoration-none"
+             style="color:#1565c0;" title="Open this class and everyone in it">
+            <span class="fw-semibold"><?= e($ev['course_code']) ?></span> <?= e($ev['course_title']) ?><?php
+              if(!empty($ev['location'])) echo ' at '.e($ev['location']);
+              if(!empty($ev['trainer_name'])) echo ' with '.e($ev['trainer_name']);
+              if($st) echo ' at '.e($st);
+            ?>
+          </a>
           <span class="badge <?= $full?'text-bg-danger':'text-bg-light border' ?> ms-1"><?= $bk ?><?= $places?'/'.$places:'' ?> booked</span>
         </div>
       </div>
@@ -134,8 +139,8 @@
   <div class="col-lg-7">
     <div class="card p-3 h-100">
       <div class="d-flex justify-content-between align-items-center mb-2">
-        <h6 class="fw-bold mb-0"><i class="bi bi-bell text-danger"></i> Renewals due (next 60 days)</h6>
-        <a href="?r=reminders" class="small">Manage reminders →</a>
+        <h6 class="fw-bold mb-0"><i class="bi bi-bell text-danger"></i> Next to expire (30 days)</h6>
+        <a href="?r=reminders" class="small">All renewals →</a>
       </div>
       <div class="table-responsive">
       <table class="table table-sm align-middle mb-0">
@@ -143,13 +148,21 @@
         <tbody>
         <?php foreach ($expiring as $x): $d = days_until($x['expiry_date']); ?>
           <tr>
-            <td class="fw-semibold"><?= e($x['first_name'].' '.$x['last_name']) ?><div class="text-muted small"><?= e($x['email']) ?></div></td>
+            <td class="fw-semibold">
+              <a href="?r=student&id=<?= (int)$x['student_id'] ?>" class="text-decoration-none"><?= e($x['first_name'].' '.$x['last_name']) ?></a>
+              <div class="text-muted small"><?= e($x['email']) ?></div>
+            </td>
             <td class="small"><?= e($x['course_title']) ?></td>
             <td class="small"><?= e($x['expiry_date']) ?></td>
             <td><?php if ($d < 0): ?><span class="badge text-bg-danger">Expired <?= abs($d) ?>d ago</span>
+                <?php elseif ($d === 0): ?><span class="badge text-bg-danger">today</span>
+                <?php elseif ($d <= 7): ?><span class="badge text-bg-danger">in <?= $d ?>d</span>
                 <?php else: ?><span class="badge text-bg-warning">in <?= $d ?>d</span><?php endif; ?></td>
           </tr>
-        <?php endforeach; if (!$expiring): ?><tr><td colspan="4" class="text-muted small">Nothing due.</td></tr><?php endif; ?>
+        <?php endforeach; if (!$expiring): ?><tr><td colspan="4" class="text-muted small">
+          Nothing expiring in the next 30 days. <a href="?r=reminders">Renewal Reminders</a> has the
+          students whose certificates have already lapsed.
+        </td></tr><?php endif; ?>
         </tbody>
       </table>
       </div>

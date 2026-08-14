@@ -80,7 +80,10 @@ function status_badge(string $s): string {
 /** days until date (negative if past) */
 function days_until(?string $date): ?int {
     if (!$date) return null;
-    $d = new DateTime($date); $now = new DateTime('2026-08-01');
+    // This used to compare against a hard-coded 2026-08-01 left over from the
+    // demo data, so every "expires in N days" on the system was wrong by
+    // however long ago that was.
+    $d = new DateTime($date); $now = new DateTime('today');
     return (int)$now->diff($d)->format('%r%a');
 }
 
