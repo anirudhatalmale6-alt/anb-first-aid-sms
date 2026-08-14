@@ -194,15 +194,23 @@ function anb_usi_verify_student(PDO $pdo, int $studentId, string $checkedBy = ''
         return anb_usi_result(false, false, '', $problem, []);
     }
 
+    // A person with one legal name is a real thing and the registry has its own
+    // field for it - sending their only name as a family name with an empty
+    // first name would never match. No first name on file means single name.
+    $single = anb_usi_is_placeholder_name((string)$s['first_name'])
+            ? trim((string)$s['last_name'])
+            : null;
+    if ($single === '') $single = null;
+
     try {
         $client = anb_usi_client($pdo);
-        $r = $client->verifyUsi($usi, (string)$s['first_name'], (string)$s['last_name'], $dob);
+        $r = $client->verifyUsi($usi, (string)$s['first_name'], (string)$s['last_name'], $dob, $single);
     } catch (Throwable $e) {
         // An expired or rejected token is worth one clean retry.
         try {
             $client = anb_usi_client($pdo);
             $client->forgetToken();
-            $r = $client->verifyUsi($usi, (string)$s['first_name'], (string)$s['last_name'], $dob);
+            $r = $client->verifyUsi($usi, (string)$s['first_name'], (string)$s['last_name'], $dob, $single);
         } catch (Throwable $e2) {
             anb_usi_log($pdo, $studentId, $usi, $cfg, null, $e2->getMessage(), $checkedBy);
             return anb_usi_result(false, false, '', 'Could not reach the USI Registry: ' . $e2->getMessage(), []);
@@ -549,4 +557,302 @@ function anb_usi_bulk_reason_bucket(string $reason): string {
     if (str_contains($r, 'date of birth'))           return 'Date of birth problem';
     if (str_contains($r, 'could not reach') || str_contains($r, 'error:')) return 'Could not reach the registry';
     return 'Other';
+}
+
+/* ================= name repair =================
+ *
+ * The migration from RTO Data Cloud left a batch of records with the literal
+ * text "(unknown)" in the first name and the student's whole name sitting in
+ * the family name - "(unknown)" / "Amandeep Kaur". Those can never verify, and
+ * they would fail an AVETMISS submission too.
+ *
+ * The fix is not to guess. We try a rearrangement, ask the registry, and keep
+ * it only if the registry says it now matches. Anything the registry does not
+ * confirm is left exactly as it was, so nothing invented is ever saved.
+ *
+ * Trial lookups deliberately do NOT write to usi_verify_log. A student with
+ * three candidate spellings would otherwise put three failures in the audit
+ * trail for what is really one question. The log entry is written when the
+ * change is applied, through the normal verify path.
+ */
+
+/** Values that mean "we never got a first name", not an actual name. */
+function anb_usi_is_placeholder_name(?string $v): bool {
+    $v = strtolower(trim((string)$v));
+    return in_array($v, ['', '(unknown)', 'unknown', 'n/a', 'na', 'nil', 'none', '-', '.', '?'], true);
+}
+
+function anb_usi_repair_schema(PDO $pdo): void {
+    $pdo->exec("CREATE TABLE IF NOT EXISTS usi_name_repair (
+        student_id INTEGER PRIMARY KEY,
+        state      TEXT DEFAULT 'pending',   -- pending | matched | nomatch | error
+        old_first  TEXT,
+        old_last   TEXT,
+        new_first  TEXT,
+        new_last   TEXT,
+        new_single TEXT,
+        tried      INTEGER DEFAULT 0,
+        note       TEXT,
+        checked_at TEXT,
+        applied_at TEXT
+    )");
+}
+
+/**
+ * Students this can help: a USI on file, not verified, and a first name that is
+ * a placeholder rather than a name. Anything else is a genuine spelling
+ * difference for a human to look at, not something to rearrange.
+ */
+function anb_usi_repair_candidates(PDO $pdo): array {
+    $rows = $pdo->query("SELECT id, first_name, last_name FROM students
+        WHERE TRIM(COALESCE(usi_number,'')) <> '' AND COALESCE(usi_verified,0)=0
+        ORDER BY id")->fetchAll(PDO::FETCH_ASSOC);
+    $out = [];
+    foreach ($rows as $r) {
+        $firstBlank = anb_usi_is_placeholder_name($r['first_name']);
+        $lastBlank  = anb_usi_is_placeholder_name($r['last_name']);
+        // Exactly one side must be a placeholder - if both are, there is no
+        // name to work with; if neither is, there is nothing to rearrange.
+        if ($firstBlank !== $lastBlank) $out[] = (int)$r['id'];
+    }
+    return $out;
+}
+
+/**
+ * The spellings worth asking the registry about, best guess first.
+ *
+ * Each option is [firstName, familyName, singleName]. A single-name person is
+ * a real thing in the registry - it has its own field - so a one-word name is
+ * asked as a single name rather than shoved into one half of a pair.
+ *
+ * Capped at four options so a run stays bounded: 164 students should cost a
+ * few hundred lookups, not a few thousand.
+ */
+function anb_usi_repair_options(string $first, string $last): array {
+    $firstBlank = anb_usi_is_placeholder_name($first);
+    $lastBlank  = anb_usi_is_placeholder_name($last);
+    // Both sides filled means there is a real first and family name already -
+    // that is a spelling difference for a person to look at, not something to
+    // rearrange. Both blank means there is no name here at all.
+    if ($firstBlank === $lastBlank) return [];
+
+    $name = $firstBlank ? $last : $first;
+    $w = preg_split('/\s+/', trim(preg_replace('/\s+/', ' ', $name)), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+    $n = count($w);
+
+    if ($n === 0) return [];
+    if ($n === 1) return [['', '', $w[0]]];
+    if ($n === 2) {
+        return [
+            [$w[0], $w[1], ''],            // Amandeep | Kaur - by far the common case
+            [$w[1], $w[0], ''],            // the record was entered the other way round
+            ['', '', $w[0] . ' ' . $w[1]], // one legal name that happens to contain a space
+        ];
+    }
+    // Three or more: the split could fall either side of the middle word, and
+    // some registries hold the middle name as part of the first name.
+    $firstWord = $w[0];
+    $lastWord  = $w[$n - 1];
+    return [
+        [$firstWord, implode(' ', array_slice($w, 1)), ''],
+        [implode(' ', array_slice($w, 0, $n - 1)), $lastWord, ''],
+        [$firstWord, $lastWord, ''],
+        ['', '', implode(' ', $w)],
+    ];
+}
+
+/** Queue every candidate and open a scan. Any previous scan is cleared. */
+function anb_usi_repair_start(PDO $pdo): array {
+    anb_usi_repair_schema($pdo);
+    $ids = anb_usi_repair_candidates($pdo);
+
+    $pdo->beginTransaction();
+    try {
+        $pdo->exec("DELETE FROM usi_name_repair");
+        $ins = $pdo->prepare("INSERT INTO usi_name_repair (student_id, old_first, old_last)
+            SELECT id, first_name, last_name FROM students WHERE id=?");
+        foreach ($ids as $id) $ins->execute([$id]);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
+    anb_setting_save($pdo, 'usi_repair_state', 'running');
+    anb_setting_save($pdo, 'usi_repair_started', date('Y-m-d H:i:s'));
+    anb_setting_save($pdo, 'usi_repair_finished', '');
+    return anb_usi_repair_progress($pdo);
+}
+
+function anb_usi_repair_stop(PDO $pdo): void {
+    anb_setting_save($pdo, 'usi_repair_state', 'stopped');
+}
+
+/**
+ * Work through a few students: try each candidate spelling against the registry
+ * and stop at the first one it confirms. Writes nothing to the student record.
+ */
+function anb_usi_repair_step(PDO $pdo, int $batch = 3): array {
+    anb_usi_repair_schema($pdo);
+
+    $s = anb_settings($pdo);
+    if (($s['usi_repair_state'] ?? '') !== 'running') {
+        return anb_usi_repair_progress($pdo) + ['ran' => 0, 'note' => 'No scan in progress.'];
+    }
+    $cfg = anb_usi_config($pdo);
+    if ($cfg['mode'] !== 'live') {
+        return anb_usi_repair_progress($pdo) + ['ran' => 0, 'note' => 'The USI Registry is not in live mode.'];
+    }
+
+    $lock = ANB_USI_DIR . '/repair.lock';
+    $fh = @fopen($lock, 'x');
+    if ($fh === false) {
+        if (is_file($lock) && (time() - (int)filemtime($lock)) > 300) {
+            @unlink($lock);
+            $fh = @fopen($lock, 'x');
+        }
+        if ($fh === false) {
+            return anb_usi_repair_progress($pdo) + ['ran' => 0, 'note' => 'Another batch is running.'];
+        }
+    }
+    fwrite($fh, (string)getmypid());
+    fclose($fh);
+
+    $ran = [];
+    try {
+        $rows = $pdo->query("SELECT r.student_id, r.old_first, r.old_last,
+                   s.usi_number, s.date_of_birth
+            FROM usi_name_repair r JOIN students s ON s.id=r.student_id
+            WHERE r.state='pending' ORDER BY r.student_id LIMIT " . max(1, min(10, $batch)))
+            ->fetchAll(PDO::FETCH_ASSOC);
+
+        $mark = $pdo->prepare("UPDATE usi_name_repair
+            SET state=?, new_first=?, new_last=?, new_single=?, tried=?, note=?, checked_at=?
+            WHERE student_id=?");
+
+        foreach ($rows as $row) {
+            $sid = (int)$row['student_id'];
+            $usi = strtoupper(trim((string)$row['usi_number']));
+            $dob = anb_usi_dob((string)$row['date_of_birth']);
+            $now = date('Y-m-d H:i:s');
+
+            $problem = anb_usi_format_problem($usi);
+            if ($problem === '' && $dob === '') {
+                $problem = 'The date of birth on this record cannot be read, so the registry cannot check it.';
+            }
+            if ($problem !== '') {
+                $mark->execute(['nomatch', '', '', '', 0, $problem, $now, $sid]);
+                continue;
+            }
+
+            $options = anb_usi_repair_options((string)$row['old_first'], (string)$row['old_last']);
+            $tried = 0; $hit = null; $err = '';
+            try {
+                $client = anb_usi_client($pdo);
+                foreach ($options as [$f, $l, $single]) {
+                    $tried++;
+                    $r = $client->verifyUsi($usi, $f, $l, $dob, $single !== '' ? $single : null);
+                    if ($r['verified']) { $hit = [$f, $l, $single]; break; }
+                }
+            } catch (Throwable $e) {
+                $err = $e->getMessage();
+            }
+
+            if ($hit !== null) {
+                $mark->execute(['matched', $hit[0], $hit[1], $hit[2], $tried, '', $now, $sid]);
+                $ran[] = ['id' => $sid, 'usi' => $usi, 'matched' => true,
+                          'was'  => trim((string)$row['old_first'] . ' ' . (string)$row['old_last']),
+                          'now'  => $hit[2] !== '' ? $hit[2] : trim($hit[0] . ' ' . $hit[1]),
+                          'single' => $hit[2] !== ''];
+            } elseif ($err !== '') {
+                $mark->execute(['error', '', '', '', $tried, 'Could not reach the registry: ' . $err, $now, $sid]);
+                $ran[] = ['id' => $sid, 'usi' => $usi, 'matched' => false, 'note' => 'registry error'];
+            } else {
+                $mark->execute(['nomatch', '', '', '', $tried,
+                    'Tried ' . $tried . ' spelling' . ($tried === 1 ? '' : 's') . ', the registry confirmed none of them.',
+                    $now, $sid]);
+                $ran[] = ['id' => $sid, 'usi' => $usi, 'matched' => false,
+                          'was' => trim((string)$row['old_first'] . ' ' . (string)$row['old_last'])];
+            }
+        }
+    } finally {
+        @unlink($lock);
+    }
+
+    $p = anb_usi_repair_progress($pdo);
+    if ($p['pending'] === 0 && $p['total'] > 0) {
+        anb_setting_save($pdo, 'usi_repair_state', 'done');
+        anb_setting_save($pdo, 'usi_repair_finished', date('Y-m-d H:i:s'));
+        $p = anb_usi_repair_progress($pdo);
+    }
+    return $p + ['ran' => count($ran), 'rows' => $ran];
+}
+
+/** @return array{total:int,done:int,pending:int,matched:int,nomatch:int,applied:int,state:string,started_at:string,finished_at:string} */
+function anb_usi_repair_progress(PDO $pdo): array {
+    anb_usi_repair_schema($pdo);
+    $c = $pdo->query("SELECT
+            COUNT(*) total,
+            SUM(CASE WHEN state<>'pending' THEN 1 ELSE 0 END) done,
+            SUM(CASE WHEN state='pending'  THEN 1 ELSE 0 END) pending,
+            SUM(CASE WHEN state='matched'  THEN 1 ELSE 0 END) matched,
+            SUM(CASE WHEN state='nomatch' OR state='error' THEN 1 ELSE 0 END) nomatch,
+            SUM(CASE WHEN applied_at IS NOT NULL THEN 1 ELSE 0 END) applied
+        FROM usi_name_repair")->fetch(PDO::FETCH_ASSOC) ?: [];
+    $s = anb_settings($pdo);
+    return [
+        'total'       => (int)($c['total'] ?? 0),
+        'done'        => (int)($c['done'] ?? 0),
+        'pending'     => (int)($c['pending'] ?? 0),
+        'matched'     => (int)($c['matched'] ?? 0),
+        'nomatch'     => (int)($c['nomatch'] ?? 0),
+        'applied'     => (int)($c['applied'] ?? 0),
+        'state'       => (string)($s['usi_repair_state'] ?? ''),
+        'started_at'  => (string)($s['usi_repair_started'] ?? ''),
+        'finished_at' => (string)($s['usi_repair_finished'] ?? ''),
+    ];
+}
+
+/** @return array<int,array<string,mixed>> */
+function anb_usi_repair_rows(PDO $pdo, string $state = ''): array {
+    anb_usi_repair_schema($pdo);
+    $sql = "SELECT r.*, s.usi_number, s.date_of_birth, s.email
+            FROM usi_name_repair r JOIN students s ON s.id=r.student_id";
+    if ($state !== '') $sql .= " WHERE r.state=" . $pdo->quote($state);
+    $sql .= " ORDER BY r.state, s.last_name, s.first_name";
+    return $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+}
+
+/**
+ * Save the confirmed changes. Only rows the registry matched, and only those
+ * not already applied. Each one goes through the normal verify path afterwards
+ * so the tick and the audit-log entry are written the same way a staff member
+ * pressing the button would write them.
+ */
+function anb_usi_repair_apply(PDO $pdo, string $by): array {
+    anb_usi_repair_schema($pdo);
+    $rows = $pdo->query("SELECT * FROM usi_name_repair
+        WHERE state='matched' AND applied_at IS NULL")->fetchAll(PDO::FETCH_ASSOC);
+
+    $upd  = $pdo->prepare("UPDATE students SET first_name=?, last_name=? WHERE id=?");
+    $done = $pdo->prepare("UPDATE usi_name_repair SET applied_at=? WHERE student_id=?");
+
+    $saved = 0; $verified = 0; $failed = [];
+    foreach ($rows as $r) {
+        $sid = (int)$r['student_id'];
+        // A single-name student keeps the name in the family-name field and
+        // carries no first name - that is how the registry itself holds them.
+        $first = (string)$r['new_single'] !== '' ? '' : (string)$r['new_first'];
+        $last  = (string)$r['new_single'] !== '' ? (string)$r['new_single'] : (string)$r['new_last'];
+        try {
+            $upd->execute([$first, $last, $sid]);
+            $done->execute([date('Y-m-d H:i:s'), $sid]);
+            $saved++;
+            $res = anb_usi_verify_student($pdo, $sid, $by);
+            if ($res['verified']) $verified++;
+            else $failed[] = $sid;
+        } catch (Throwable $e) {
+            $failed[] = $sid;
+        }
+    }
+    return ['saved' => $saved, 'verified' => $verified, 'failed' => count($failed)];
 }

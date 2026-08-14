@@ -955,6 +955,66 @@ case 'usi_bulk_csv':
     fclose($out);
     exit;
 
+/* ---- name repair: the "(unknown)" import artefact ---- */
+
+case 'usi_repair':
+    require_once __DIR__.'/../lib/usi.php';
+    $cfg      = anb_usi_config($pdo);
+    $progress = anb_usi_repair_progress($pdo);
+    $waiting  = count(anb_usi_repair_candidates($pdo));
+    $rows     = anb_usi_repair_rows($pdo);
+    render('usi_repair', compact('cfg','progress','waiting','rows'), 'Fix imported names');
+    break;
+
+case 'usi_repair_start':
+    require_once __DIR__.'/../lib/usi.php';
+    if ($_SERVER['REQUEST_METHOD']==='POST') {
+        $cfg = anb_usi_config($pdo);
+        if ($cfg['mode'] !== 'live') {
+            $_SESSION['flash'] = 'Switch the USI Registry to Live before scanning.';
+        } else {
+            anb_usi_repair_start($pdo);
+        }
+    }
+    redirect('?r=usi_repair');
+    break;
+
+case 'usi_repair_stop':
+    require_once __DIR__.'/../lib/usi.php';
+    if ($_SERVER['REQUEST_METHOD']==='POST') anb_usi_repair_stop($pdo);
+    redirect('?r=usi_repair');
+    break;
+
+case 'usi_repair_step':
+    require_once __DIR__.'/../lib/usi.php';
+    header('Content-Type: application/json');
+    try {
+        $out = anb_usi_repair_step($pdo, (int)($_GET['n'] ?? 3));
+    } catch (Throwable $e) {
+        http_response_code(500);
+        $out = ['error' => $e->getMessage()];
+    }
+    echo json_encode($out);
+    exit;
+
+// Writing to student records is an administrator action, not something the
+// office should be able to do to 164 records with one click.
+case 'usi_repair_apply':
+    require_once __DIR__.'/../lib/usi.php';
+    $u = current_user();
+    if (($u['role'] ?? 'admin') !== 'admin') {
+        $_SESSION['flash'] = 'Only an administrator can save these changes.';
+        redirect('?r=usi_repair');
+    }
+    if ($_SERVER['REQUEST_METHOD']==='POST') {
+        $res = anb_usi_repair_apply($pdo, (string)($u['name'] ?? $u['email'] ?? ''));
+        $_SESSION['flash'] = 'Saved ' . $res['saved'] . ' name' . ($res['saved']===1?'':'s')
+            . ', ' . $res['verified'] . ' now verified against the registry'
+            . ($res['failed'] ? ', ' . $res['failed'] . ' need another look' : '') . '.';
+    }
+    redirect('?r=usi_repair');
+    break;
+
 case 'courses':
     $rows = $pdo->query("
         SELECT co.*, (SELECT COUNT(*) FROM plans p WHERE p.course_id=co.id) plans,

@@ -13,9 +13,14 @@ $pct = $progress['total'] > 0 ? (int)round($progress['done'] / $progress['total'
 ?>
 <div class="d-flex align-items-center justify-content-between mb-3">
   <h4 class="mb-0"><i class="bi bi-patch-check"></i> Bulk USI verification</h4>
-  <a class="btn btn-sm btn-outline-secondary" href="?r=usi_registry">
-    <i class="bi bi-gear"></i> USI Registry settings
-  </a>
+  <div class="d-flex gap-2">
+    <a class="btn btn-sm btn-outline-danger" href="?r=usi_repair">
+      <i class="bi bi-person-vcard"></i> Fix imported names
+    </a>
+    <a class="btn btn-sm btn-outline-secondary" href="?r=usi_registry">
+      <i class="bi bi-gear"></i> USI Registry settings
+    </a>
+  </div>
 </div>
 
 <p class="text-muted">

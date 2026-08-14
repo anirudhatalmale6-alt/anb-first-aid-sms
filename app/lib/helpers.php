@@ -32,7 +32,10 @@ function role_routes(string $role): array {
       'rto_sync','rto_sync_push','rto_sync_map',
       // USI Registry: office can run a check and see the log, but not change the credential
       // and office can work through the backlog, but not start/stop a run
-      'usi_registry','usi_registry_test','usi_check','usi_bulk','usi_bulk_step','usi_bulk_csv'];
+      // name repair: office can look at what the registry found, but saving a
+      // change to 164 student records is an administrator action
+      'usi_registry','usi_registry_test','usi_check','usi_bulk','usi_bulk_step','usi_bulk_csv',
+      'usi_repair','usi_repair_step'];
     $trainer = ['dashboard','trainer','students','student','schedules','pipeline','class_send_access','obs_list','obs_mark','obs_save',
       'form_subs','form_view','content','quiz_edit','signoff','generate','cert','usi_verify','usi_check',
       'my_trainer','my_trainer_save','my_trainer_qual','my_trainer_declare','my_trainer_insurance',
