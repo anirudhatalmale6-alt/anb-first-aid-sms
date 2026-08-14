@@ -482,6 +482,23 @@ if (in_array($r, ['learn','scorm_track','quiz_submit','form_submit','quiz_reset'
     exit;
 }
 
+/**
+ * Token-guarded daily runner for the renewal reminders, so cPanel cron can
+ * reach it. It sits above the login gate because cron has no session - the
+ * token is what protects it, and it does nothing at all while the switch is
+ * off, so scheduling it before you are ready is safe.
+ */
+if ($r === 'reminders_cron') {
+    require_once __DIR__ . '/../lib/reminders.php';
+    if (($_GET['token'] ?? '') !== 'anb-renewals-2026') { http_response_code(403); echo 'forbidden'; exit; }
+    header('Content-Type: text/plain');
+    $res = rem_run(db(), false);
+    echo $res['ran']
+        ? "sent={$res['sent']} failed={$res['failed']} considered={$res['considered']}\n"
+        : "not run: {$res['why']}\n";
+    exit;
+}
+
 require_login();
 $pdo = db();
 
@@ -1659,14 +1676,72 @@ case 'certificates':
     break;
 
 case 'reminders':
-    // renewal reminder engine preview: certs expiring soon / expired, grouped
+    require_once __DIR__.'/../lib/reminders.php';
+    rem_schema($pdo);
+    $cfg = rem_config($pdo);
+    $due = rem_due($pdo);
+    $lapsed = rem_lapsed_count($pdo);
+    $preview = $_SESSION['rem_preview'] ?? null; unset($_SESSION['rem_preview']);
+    // Only the next six weeks - the old page listed all 11,000 certificates,
+    // oldest expiry first, so the top of it was people years out of date.
     $rows = $pdo->query("
-        SELECT c.*, s.first_name, s.last_name, s.email, co.title course_title, co.validity_months
+        SELECT c.*, s.id student_id, s.first_name, s.last_name, s.email,
+               co.title course_title, co.validity_months
         FROM certificates c JOIN students s ON s.id=c.student_id
         JOIN enrolments e ON e.id=c.enrolment_id JOIN courses co ON co.id=e.course_id
-        WHERE c.expiry_date IS NOT NULL ORDER BY c.expiry_date ASC")->fetchAll();
-    render('reminders', compact('rows'), 'Renewal Reminders');
+        WHERE c.expiry_date IS NOT NULL
+          AND date(c.expiry_date) >= date('now')
+          AND date(c.expiry_date) <= date('now','+42 day')
+        ORDER BY date(c.expiry_date) ASC")->fetchAll();
+    render('reminders', compact('rows','cfg','due','lapsed','preview'), 'Renewal Reminders');
     break;
+
+/** Dry run - shows exactly what a real run would do, sends nothing. */
+case 'reminders_preview':
+    require_once __DIR__.'/../lib/reminders.php';
+    $_SESSION['rem_preview'] = rem_run($pdo, true);
+    redirect('?r=reminders');
+    break;
+
+/** The on/off switch. Admin only - this one starts emailing real students. */
+case 'reminders_toggle':
+    require_once __DIR__.'/../lib/reminders.php';
+    $u = current_user();
+    if (($u['role'] ?? 'admin') !== 'admin') {
+        $_SESSION['flash'] = 'Only an administrator can switch renewal reminders on or off.';
+        $_SESSION['flash_error'] = 1;
+        redirect('?r=reminders');
+    }
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        rem_schema($pdo);
+        $on = ($_POST['on'] ?? '0') === '1';
+        anb_setting_save($pdo, 'reminders_on', $on ? '1' : '0');
+        $_SESSION['flash'] = $on
+            ? 'Renewal reminders are ON. The next run will email students who are due.'
+            : 'Renewal reminders are OFF. Nothing further will be sent.';
+    }
+    redirect('?r=reminders');
+    break;
+
+/** One reminder, by hand, for the row the office is looking at. */
+case 'reminders_send_one':
+    require_once __DIR__.'/../lib/reminders.php';
+    rem_schema($pdo);
+    $cid = (int)($_POST['cert_id'] ?? 0);
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && $cid) {
+        $rows = array_values(array_filter(rem_due($pdo), fn($r) => (int)$r['id'] === $cid));
+        if (!$rows) {
+            $_SESSION['flash'] = 'That reminder is not due - it may already have been sent.';
+            $_SESSION['flash_error'] = 1;
+        } else {
+            [$ok, $msg] = rem_send_one($pdo, $rows[0], false);
+            $_SESSION['flash'] = $msg;
+            if (!$ok) $_SESSION['flash_error'] = 1;
+        }
+    }
+    redirect('?r=reminders');
+    break;
+
 
 case 'trainer':
     // Trainer dashboard: classes assigned to this trainer + readiness
