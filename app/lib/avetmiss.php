@@ -67,13 +67,19 @@ function avetmiss_select_columns(string $alias = 's'): string {
  * codes already in anb_demo_label() so the student screen keeps reading right.
  */
 function avetmiss_country_options(): array {
+    // SACC (ABS 1269.0). 7106 read "Sri Lanka" here and it is Pakistan - the
+    // real Sri Lanka is 7107. Anyone picking Sri Lanka from this list was
+    // being recorded as born in Pakistan.
     return [
         '1101' => 'Australia',
         '1201' => 'New Zealand',
         '7103' => 'India',
         '5204' => 'Philippines',
         '7105' => 'Nepal',
-        '7106' => 'Sri Lanka',
+        '7106' => 'Pakistan',
+        '7107' => 'Sri Lanka',
+        '7101' => 'Bangladesh',
+        '6101' => 'China',
         '1502' => 'Fiji',
         '9124' => 'Another country',
     ];

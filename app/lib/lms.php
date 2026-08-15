@@ -217,8 +217,13 @@ function anb_demo_label(string $field, ?string $code): string {
                      '07'=>'Unemployed - seeking part-time work','08'=>'Not employed, not seeking work','@@'=>'Not stated'],
         'lang'   => ['1201'=>'English','5203'=>'Tagalog / Filipino','5207'=>'Tagalog','4202'=>'Arabic','5206'=>'Bisaya',
                      '5212'=>'Cebuano','6512'=>'Nepali','6511'=>'Hindi','7101'=>'Tongan','9799'=>'Another language'],
+        // SACC (ABS 1269.0). 7106 was labelled "Sri Lanka" here, which is wrong -
+        // 7106 is Pakistan and 7107 is Sri Lanka - so 214 students born in
+        // Pakistan were being shown as Sri Lankan. The stored codes are
+        // untouched; only what we call them changes.
         'country'=> ['1101'=>'Australia','7103'=>'India','5204'=>'Philippines','9124'=>'Other','7105'=>'Nepal',
-                     '7106'=>'Sri Lanka','1502'=>'Fiji','1201'=>'New Zealand'],
+                     '7106'=>'Pakistan','7107'=>'Sri Lanka','7101'=>'Bangladesh','6101'=>'China',
+                     '1502'=>'Fiji','1201'=>'New Zealand'],
         'disab'  => ['Y'=>'Yes','N'=>'No'],
     ];
     return $maps[$field][$code] ?? $code;

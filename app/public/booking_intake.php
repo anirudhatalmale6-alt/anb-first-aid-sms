@@ -171,6 +171,55 @@ if ($schedId && $rtoSched !== null) {
         ->execute([$rtoSched, $schedId]);
 }
 
+/**
+ * The website asks in plain English; the student records hold AVETMISS codes.
+ *
+ * Every record migrated from RTO Data Cloud stores codes - 1201 for English,
+ * '4' for "neither Aboriginal nor Torres Strait Islander", '12' for Year 12.
+ * Website bookings were storing the words instead, so 146 students had the
+ * literal text "English" where the other 5,391 had 1201. One export, two
+ * formats, and no AVETMISS file that validates. Translate on the way in.
+ *
+ * Anything not recognised is stored as it arrived rather than guessed at - a
+ * readable country name in the field beats a code that means the wrong place.
+ */
+$codeFor = static function (string $field, ?string $label): ?string {
+    $label = trim((string)$label);
+    if ($label === '') return null;
+    $maps = [
+        'school' => ['year 12'=>'12','year 11'=>'11','year 10'=>'10','year 9'=>'09',
+                     'year 8 or below'=>'08','year 8'=>'08','did not attend school'=>'02'],
+        'indig'  => ['no, neither'=>'4','neither'=>'4','aboriginal'=>'1',
+                     'torres strait islander'=>'2','both'=>'3'],
+        // "Unemployed" on the form does not say full-time or part-time seeking,
+        // so it lands on 06; if that distinction matters the form needs two
+        // options rather than this making the choice silently.
+        'labour' => ['full-time'=>'01','part-time'=>'02','self-employed'=>'03',
+                     'unemployed'=>'06','not in labour force'=>'08'],
+        'lang'   => ['english'=>'1201'],
+        'disab'  => ['yes'=>'Y','no'=>'N'],
+    ];
+    return $maps[$field][strtolower($label)] ?? $label;
+};
+
+/**
+ * Country of birth: the form sends a SACC code for the listed countries and
+ * the word "Other" plus a typed name for anything else.
+ */
+$country = trim((string)($data['country_of_birth'] ?? ''));
+if (strcasecmp($country, 'other') === 0 || $country === '') {
+    $typed = trim((string)($data['country_other'] ?? ''));
+    $country = $typed !== '' ? $typed : $country;
+}
+if (strcasecmp($country, 'other') === 0) $country = '';   // "Other" with nothing typed says nothing
+
+// A non-English language arrives as "Other" plus the language in language_other.
+$lang = trim((string)($data['main_language'] ?? ''));
+if (strcasecmp($lang, 'other') === 0) {
+    $typed = trim((string)($data['language_other'] ?? ''));
+    $lang = $typed !== '' ? $typed : '';
+}
+
 // ---- Student (match by email, else create) ----
 $stFields = [
     'salutation'=>$val('title'),'first_name'=>$first,'middle_name'=>$val('middle_name'),'last_name'=>$last,
@@ -178,9 +227,12 @@ $stFields = [
     'email'=>$email,'mobile_phone'=>$val('mobile_phone'),
     'unit_flat'=>$val('unit_number'),'street_number'=>$val('street_number'),'street_name'=>$val('street_name'),
     'suburb'=>$val('suburb'),'state'=>$val('state'),'postcode'=>$val('postcode'),
-    'highest_school_level'=>$val('school_level'),'indigenous_status'=>$val('atsi_status'),
-    'labour_force_status'=>$val('employment_status'),'main_language'=>$val('main_language'),
-    'disability_flag'=>$val('disability'),
+    'highest_school_level'=>$codeFor('school', $val('school_level')),
+    'indigenous_status'   =>$codeFor('indig',  $val('atsi_status')),
+    'labour_force_status' =>$codeFor('labour', $val('employment_status')),
+    'main_language'       =>$codeFor('lang',   $lang !== '' ? $lang : null),
+    'country_of_birth'    =>$country !== '' ? $country : null,
+    'disability_flag'     =>$codeFor('disab',  $val('disability')),
 ];
 $q=$pdo->prepare("SELECT id FROM students WHERE LOWER(email)=? LIMIT 1"); $q->execute([$email]);
 $studentId = (int)($q->fetchColumn() ?: 0);
