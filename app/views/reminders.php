@@ -134,6 +134,12 @@ $isErr = !empty($_SESSION['flash_error']); unset($_SESSION['flash_error']);
           <?php if ($todayRun && !empty($todayRun['finished_at'])): ?>
             <span class="text-success">Today's run is done</span> -
             <?= (int)$todayRun['sent'] ?> sent<?= (int)$todayRun['failed'] ? ', '.(int)$todayRun['failed'].' failed' : '' ?>.
+            <?php if (!empty($todayRun['notes'])): ?>
+              <div class="text-danger mt-1" style="font-size:.75rem;white-space:pre-line;">
+                <?= e(str_replace('FAILED: ', '', (string)$todayRun['notes'])) ?>
+              </div>
+              <div class="text-muted" style="font-size:.72rem;">These are tried again on the next run.</div>
+            <?php endif; ?>
           <?php elseif ($todayRun): ?>
             <span class="text-warning">Today's run is going out now.</span>
           <?php else: ?>

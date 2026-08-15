@@ -444,9 +444,14 @@ function rem_claim_day(PDO $pdo, string $by): bool {
     }
 }
 
-function rem_close_day(PDO $pdo, int $sent, int $failed): void {
-    $pdo->prepare("UPDATE reminder_runs SET sent=?, failed=?, finished_at=? WHERE run_date=?")
-        ->execute([$sent, $failed, date('Y-m-d H:i:s'), date('Y-m-d')]);
+function rem_close_day(PDO $pdo, int $sent, int $failed, array $notes = []): void {
+    // Why a send failed used to exist only in memory for the length of the
+    // request, so a run reporting "1 failed" left nothing at all to look at.
+    $cols = $pdo->query("PRAGMA table_info(reminder_runs)")->fetchAll(PDO::FETCH_COLUMN, 1);
+    if (!in_array('notes', $cols, true)) $pdo->exec("ALTER TABLE reminder_runs ADD COLUMN notes TEXT");
+    $pdo->prepare("UPDATE reminder_runs SET sent=?, failed=?, finished_at=?, notes=? WHERE run_date=?")
+        ->execute([$sent, $failed, date('Y-m-d H:i:s'),
+                   $notes ? implode("\n", array_slice($notes, 0, 40)) : null, date('Y-m-d')]);
 }
 
 /** Has today's run already happened? For display only - never for gating. */
@@ -475,6 +480,8 @@ function rem_run_daily(PDO $pdo, string $by): array {
 
     $res  = rem_run($pdo, false);
     $sent = (int)$res['sent']; $failed = (int)$res['failed'];
+    $notes = array_values(array_filter((array)$res['lines'],
+        static fn($l) => strncmp((string)$l, 'FAILED:', 7) === 0));
 
     // The lapsed campaign rides the same daily claim, so it also runs once a
     // day and cannot overlap itself. Its own switch, its own cap - she asked
@@ -484,6 +491,9 @@ function rem_run_daily(PDO $pdo, string $by): array {
         $lres = rem_lapsed_run($pdo, $lap['band'], $lap['cap'], false);
         $sent   += (int)$lres['sent'];
         $failed += (int)$lres['failed'];
+        foreach ((array)($lres['lines'] ?? []) as $l) {
+            if (strncmp((string)$l, 'FAILED:', 7) === 0) $notes[] = $l;
+        }
         // When a band runs dry, stop rather than silently moving to a colder
         // list - which group gets contacted is her decision, not a default.
         if ((int)$lres['considered'] === 0) {
@@ -491,7 +501,7 @@ function rem_run_daily(PDO $pdo, string $by): array {
         }
     }
 
-    rem_close_day($pdo, $sent, $failed);
+    rem_close_day($pdo, $sent, $failed, $notes);
     return ['ran'=>true,'sent'=>$sent,'failed'=>$failed,'why'=>''];
 }
 
