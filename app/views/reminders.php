@@ -341,6 +341,34 @@ $bandLabel = REM_LAPSED_BANDS[$lapBand]['label'] ?? '';
         </ul>
       </div>
     </div>
+
+    <?php
+    /**
+     * The email itself, merged. Judging wording from a template full of
+     * {first_name} is judging the one part that cannot go wrong; the tokens
+     * are exactly where a wrong name or a missing link shows up.
+     */
+    if (!empty($lapPreview['sample'])): $s = $lapPreview['sample']; ?>
+      <div class="card p-3 mb-3" style="background:#fffdf7;">
+        <div class="small text-muted mb-2">
+          <i class="bi bi-envelope-paper"></i>
+          This is the actual email, exactly as
+          <strong><?= e((string)$s['name']) ?></strong> would receive it
+          &lt;<?= e((string)$s['to']) ?>&gt; - every name, course and date filled in.
+        </div>
+        <div class="border rounded p-3" style="background:#fff;">
+          <div class="fw-semibold mb-2" style="color:#2F1D3A;">
+            Subject: <?= e((string)$s['subject']) ?>
+          </div>
+          <div style="line-height:1.6;"><?= anb_body_html((string)$s["body"]) ?></div>
+        </div>
+        <div class="small text-muted mt-2">
+          Links show as they will in the email - click one to check it goes where you expect.
+          To change any of this, edit the
+          <a href="?r=emails&edit=<?= (int)($lapTpl['id'] ?? 0) ?>">Certificate Expired</a> template.
+        </div>
+      </div>
+    <?php endif; ?>
   <?php endif; ?>
 
   <div class="small text-muted mb-2">

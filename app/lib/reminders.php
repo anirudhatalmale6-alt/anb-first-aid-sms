@@ -312,7 +312,14 @@ function rem_lapsed_send_one(PDO $pdo, array $row, bool $dryRun = true): array {
     $subject = anb_merge((string)$tpl['subject'], $vars);
     $bodyTxt = anb_merge((string)$tpl['body'], $vars);
 
-    if ($dryRun) return [true, 'Would email ' . $name . ' <' . $row['email'] . '> - ' . $subject];
+    if ($dryRun) {
+        // The third element is the merged email itself. Reviewing wording from
+        // a template full of {first_name} tells you nothing about what lands in
+        // somebody's inbox - the tokens are exactly the part that can be wrong.
+        return [true, 'Would email ' . $name . ' <' . $row['email'] . '> - ' . $subject,
+                ['to' => (string)$row['email'], 'name' => $name,
+                 'subject' => $subject, 'body' => $bodyTxt]];
+    }
 
     [$ok, $err] = anb_send_mail($pdo, (string)$row['email'], $subject, anb_body_html($bodyTxt));
     if ($ok) {
@@ -337,13 +344,18 @@ function rem_lapsed_run(PDO $pdo, string $band, int $cap, bool $dryRun = true): 
                 'why'=>'Create the "' . REM_LAPSED_TEMPLATE . '" template first.'];
     }
     $rows = rem_lapsed_rows($pdo, $band, $cap);
-    $sent = 0; $failed = 0; $lines = [];
+    $sent = 0; $failed = 0; $lines = []; $sample = null;
     foreach ($rows as $r) {
-        [$ok, $msg] = rem_lapsed_send_one($pdo, $r, $dryRun);
+        $res = rem_lapsed_send_one($pdo, $r, $dryRun);
+        [$ok, $msg] = $res;
         $lines[] = ($ok ? '' : 'FAILED: ') . $msg;
         if ($ok) $sent++; else $failed++;
+        // Keep the first fully merged email so the office can read the real
+        // thing before deciding, rather than the template with the tokens in.
+        if ($sample === null && isset($res[2]) && is_array($res[2])) $sample = $res[2];
     }
-    return ['sent'=>$sent,'failed'=>$failed,'considered'=>count($rows),'lines'=>$lines,'why'=>''];
+    return ['sent'=>$sent,'failed'=>$failed,'considered'=>count($rows),'lines'=>$lines,
+            'sample'=>$sample,'why'=>''];
 }
 
 /**
