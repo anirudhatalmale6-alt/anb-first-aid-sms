@@ -283,6 +283,16 @@ function lms_recompute_online_complete(PDO $p, int $enrolmentId): void {
     $st->execute([$enrolmentId]);
     $courseId = (int)$st->fetchColumn();
     if (!$courseId) return;
+    // An office tick wins. Somebody signed their name against "this student did
+    // the theory in the room"; recomputing it back to 0 the next time they open
+    // a module would undo that decision silently, and nobody would know why the
+    // certificate stopped being available.
+    $cols = $p->query("PRAGMA table_info(enrolments)")->fetchAll(PDO::FETCH_COLUMN, 1);
+    if (in_array('online_marked_by', $cols, true)) {
+        $m = $p->prepare("SELECT online_marked_by FROM enrolments WHERE id=?");
+        $m->execute([$enrolmentId]);
+        if (trim((string)$m->fetchColumn()) !== '') return;
+    }
     $tc = $p->prepare("SELECT COUNT(*) FROM course_modules WHERE course_id=? AND active=1");
     $tc->execute([$courseId]); $total = (int)$tc->fetchColumn();
     if ($total === 0) return;

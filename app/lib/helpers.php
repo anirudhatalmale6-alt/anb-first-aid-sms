@@ -23,7 +23,7 @@ function redirect(string $to): void { header("Location: $to"); exit; }
 /** Role-based access. Admin sees everything; other roles are limited to their area. */
 function role_routes(string $role): array {
     $office = ['dashboard','students','student','student_save','enrolments','enrol_new','enrol_create','enrol_move','enrol_move_save',
-      'schedules','schedule_save','schedule_duplicate','schedule_delete','pipeline','pipe_mark','class_send_access','generate','signoff','cert','usi_verify',
+      'schedules','schedule_save','schedule_duplicate','schedule_delete','pipeline','pipe_mark','pipe_add','class_send_access','class_cert_email','generate','signoff','cert','usi_verify',
       'group_bookings','group_booking_view','group_booking_save','locations','location_save','location_delete',
       'courses','certificates','reminders','emails','email_save','email_delete','email_settings','email_settings_save',
       'email_test','cert_email','surveys','survey_view','avetmiss','avetmiss_export','avetmiss_preview',
@@ -39,7 +39,7 @@ function role_routes(string $role): array {
       // the office can look at the lapsed list and dry-run it; actually emailing
       // several hundred people is an administrator's call
       'reminders_lapsed_preview','reminders_lapsed_template'];
-    $trainer = ['dashboard','trainer','students','student','schedules','pipeline','pipe_mark','class_send_access','obs_list','obs_mark','obs_save',
+    $trainer = ['dashboard','trainer','students','student','schedules','pipeline','pipe_mark','pipe_add','class_send_access','obs_list','obs_mark','obs_save',
       'form_subs','form_view','content','quiz_edit','signoff','generate','cert','usi_verify','usi_check','usi_fix','usi_fix_save',
       'my_trainer','my_trainer_save','my_trainer_qual','my_trainer_declare','my_trainer_insurance',
       'trainer_cert_download','trainer_ins_download'];

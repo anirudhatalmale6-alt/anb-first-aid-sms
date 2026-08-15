@@ -897,6 +897,15 @@ case 'enrolments':
 
 case 'schedules':
     require_once __DIR__.'/../lib/student_portal.php'; sp_schema($pdo);
+    // 379 classes listed from 1 August meant scrolling past a fortnight of
+    // empty ones to reach the class that just finished. These narrow it down;
+    // no filter still shows everything, as before.
+    $when = (string)($_GET['when'] ?? '');
+    $whenSql = [
+        'today'    => " WHERE date(sc.start_date) = date('now')",
+        'week'     => " WHERE date(sc.start_date) BETWEEN date('now','-7 day') AND date('now','+7 day')",
+        'students' => " WHERE (SELECT COUNT(*) FROM enrolments e3 WHERE e3.schedule_id=sc.id) > 0",
+    ][$when] ?? '';
     $rows = $pdo->query("
         SELECT sc.*, p.title plan_title, co.code course_code, l.name location, u.name trainer_name,
           (SELECT COUNT(*) FROM enrolments e WHERE e.schedule_id=sc.id) AS enrolled,
@@ -907,13 +916,14 @@ case 'schedules':
            ELSE 0 END) AS no_login
         FROM schedules sc JOIN plans p ON p.id=sc.plan_id JOIN courses co ON co.id=p.course_id
         LEFT JOIN locations l ON l.id=sc.location_id LEFT JOIN users u ON u.id=sc.trainer_id
+        $whenSql
         ORDER BY sc.start_date, l.name, sc.start_time")->fetchAll();
     $plans     = $pdo->query("SELECT p.id, p.title, co.code FROM plans p JOIN courses co ON co.id=p.course_id WHERE p.active=1 ORDER BY co.code, p.title")->fetchAll();
     $locations = $pdo->query("SELECT id, name FROM locations WHERE active=1 ORDER BY name")->fetchAll();
     $trainers  = $pdo->query("SELECT id, name FROM users WHERE active=1 AND (is_trainer=1 OR role IN ('trainer','admin')) ORDER BY name")->fetchAll();
     $editId = (int)($_GET['edit'] ?? 0);
     $edit = $editId ? $pdo->query("SELECT * FROM schedules WHERE id=".$editId)->fetch() : null;
-    render('schedules', compact('rows','plans','locations','trainers','edit'), 'Schedules');
+    render('schedules', compact('rows','plans','locations','trainers','edit','when'), 'Schedules');
     break;
 
 case 'schedule_save':
@@ -1020,6 +1030,75 @@ case 'usi_verify':
     redirect('?r=student&id='.$sid);
     break;
 
+/**
+ * Put the people who were actually in the room into the class.
+ *
+ * Website bookings arrive with a course and a payment but no class, so they
+ * are invisible to the class pipeline and can never be signed off. This is the
+ * step that was missing between "they booked" and "issue their certificate".
+ */
+case 'pipe_add':
+    require_once __DIR__.'/../lib/pipeline.php';
+    pipe_schema($pdo);
+    $sid = (int)($_POST['schedule_id'] ?? 0);
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !$sid) redirect('?r=schedules');
+    $ids = (array)($_POST['enrolment_id'] ?? []);
+    if (!$ids) {
+        $_SESSION['flash'] = 'Nobody was ticked, so nothing was added.';
+        $_SESSION['flash_error'] = 1;
+        redirect('?r=pipeline&schedule_id='.$sid.'&add=1');
+    }
+    [$moved, $refused] = pipe_add_to_class($pdo, $sid, $ids);
+    $msg = $moved.' student'.($moved===1?'':'s').' added to this class.';
+    if ($refused) $msg .= ' '.$refused.' could not be added - they are booked on a different course.';
+    $_SESSION['flash'] = $msg;
+    if (!$moved) $_SESSION['flash_error'] = 1;
+    redirect('?r=pipeline&schedule_id='.$sid);
+    break;
+
+/** Email the certificates for one class - only the ones not sent yet. */
+case 'class_cert_email':
+    require_once __DIR__.'/../lib/mailer.php';
+    require_once __DIR__.'/../lib/certificate.php';
+    $sid = (int)($_POST['schedule_id'] ?? 0);
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !$sid) redirect('?r=schedules');
+    $st = $pdo->prepare("SELECT c.*, s.first_name, s.last_name, s.email, co.title course_title, co.code course_code
+        FROM certificates c JOIN students s ON s.id=c.student_id
+        JOIN enrolments e ON e.id=c.enrolment_id JOIN courses co ON co.id=e.course_id
+        WHERE e.schedule_id=? AND (c.emailed_at IS NULL OR c.emailed_at='')");
+    $st->execute([$sid]);
+    $tpl  = $pdo->query("SELECT * FROM email_templates WHERE name='Certificate Issued' LIMIT 1")->fetch();
+    $sent = 0; $skipped = [];
+    foreach ($st->fetchAll() as $cert) {
+        [$okAddr, $whyAddr] = anb_email_usable((string)$cert['email']);
+        $name = trim($cert['first_name'].' '.$cert['last_name']);
+        if (!$okAddr) { $skipped[] = $name.' ('.$whyAddr.')'; continue; }
+        try { $cert = anb_ensure_cert_pdf($pdo, $cert); }
+        catch (Throwable $ex) { $skipped[] = $name.' (certificate file could not be made)'; continue; }
+        $vars = [
+            'first_name'=>anb_greeting_name($cert['first_name'], $cert['last_name']),
+            'last_name'=>$cert['last_name'],
+            'course'=>$cert['course_code'].' - '.$cert['course_title'],
+            'certificate_number'=>$cert['certificate_number'],
+            'certificate_link'=>ANB_VERIFY_BASE.'/?r=cert&num='.urlencode($cert['certificate_number']),
+            'issue_date'=>date('d-m-Y', strtotime((string)$cert['issue_date'])),
+            'expiry_date'=>$cert['expiry_date'] ? date('d-m-Y', strtotime((string)$cert['expiry_date'])) : '',
+        ];
+        if ($vars['first_name'] === '') { $skipped[] = $name.' (no name on the record)'; continue; }
+        $subject = anb_merge($tpl['subject'] ?? 'Your certificate from A&B First Aid Training', $vars);
+        $bodyTxt = anb_merge($tpl['body'] ?? "Hi {first_name},\n\nYour certificate {certificate_number} is attached.\n\nA&B First Aid Training", $vars);
+        [$ok,$err] = anb_send_mail($pdo, $cert['email'], $subject, anb_body_html($bodyTxt),
+            [['path'=>__DIR__.'/../data/'.$cert['file_path'], 'name'=>$cert['certificate_number'].'.pdf']]);
+        if ($ok) { $pdo->prepare("UPDATE certificates SET emailed_at=datetime('now') WHERE id=?")->execute([(int)$cert['id']]); $sent++; }
+        else     { $skipped[] = $name.' ('.$err.')'; }
+        usleep(300000);
+    }
+    $_SESSION['flash'] = $sent.' certificate'.($sent===1?'':'s').' emailed.'
+        . ($skipped ? ' Not sent: '.implode('; ', $skipped) : '');
+    if (!$sent && $skipped) $_SESSION['flash_error'] = 1;
+    redirect('?r=pipeline&schedule_id='.$sid);
+    break;
+
 case 'signoff':
     require __DIR__ . '/../lib/certificate.php';
     require_once __DIR__ . '/../lib/avetmiss.php';
@@ -1034,9 +1113,29 @@ case 'signoff':
           AND e.attendance_marked=1 AND e.tasks_satisfactory=1 AND e.payment_status='paid'
           AND s.usi_number IS NOT NULL AND s.usi_number<>'' AND s.usi_verified=1");
     $q->execute([$sid]);
-    $n = 0;
-    foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $eid) { try { anb_generate_certificate($pdo, (int)$eid); $n++; } catch (Throwable $ex) {} }
-    $_SESSION['flash'] = "$n certificate(s) generated and issued.";
+    $n = 0; $failed = [];
+    foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $eid) {
+        try { anb_generate_certificate($pdo, (int)$eid); $n++; }
+        catch (Throwable $ex) {
+            // Swallowing this is how "0 certificate(s) generated" became the
+            // only thing the screen ever said.
+            $who = $pdo->prepare("SELECT s.first_name || ' ' || s.last_name FROM enrolments e
+                                  JOIN students s ON s.id=e.student_id WHERE e.id=?");
+            $who->execute([(int)$eid]);
+            $failed[] = trim((string)$who->fetchColumn()) . ' (' . $ex->getMessage() . ')';
+        }
+    }
+    require_once __DIR__ . '/../lib/pipeline.php';
+    $held = pipe_blockers($pdo, $sid);
+    $msg = $n . ' certificate' . ($n === 1 ? '' : 's') . ' issued.';
+    if ($failed) $msg .= ' Could not issue: ' . implode('; ', $failed) . '.';
+    if ($held) {
+        $msg .= ' ' . count($held) . ($n ? ' other' : '') . ' student' . (count($held) === 1 ? '' : 's')
+              . ' held back - see the list below for what each one still needs.';
+    }
+    if (!$n && !$failed && !$held) $msg = 'Everyone in this class already has their certificate.';
+    $_SESSION['flash'] = $msg;
+    if (!$n) $_SESSION['flash_error'] = 1;
     redirect('?r=pipeline&schedule_id='.$sid);
     break;
 
@@ -1083,7 +1182,18 @@ case 'pipeline':
         $rows[$i]['avetmiss_total']    = $avetTotal;   // lets the view tell "part done" from "nothing done"
         $rows[$i]['avetmiss_complete'] = $miss ? 0 : 1;
     }
-    render('pipeline', compact('schedule','rows'), 'Class pipeline');
+    // "Who was in the room" - bookings on this course with no class against
+    // them. Only fetched when the panel is open, since it is a wide list.
+    $addOpen   = !empty($_GET['add']) || (trim((string)($_GET['q'] ?? '')) !== '');
+    $addSearch = trim((string)($_GET['q'] ?? ''));
+    $addRows   = $addOpen ? pipe_unattached($pdo, $sid, $addSearch) : [];
+    $blockers  = pipe_blockers($pdo, $sid);
+    // Certificates already issued for this class that have not been emailed.
+    $unsent = $pdo->prepare("SELECT COUNT(*) FROM certificates c JOIN enrolments e ON e.id=c.enrolment_id
+                             WHERE e.schedule_id=? AND (c.emailed_at IS NULL OR c.emailed_at='')");
+    $unsent->execute([$sid]);
+    $unsentCerts = (int)$unsent->fetchColumn();
+    render('pipeline', compact('schedule','rows','addOpen','addSearch','addRows','blockers','unsentCerts'), 'Class pipeline');
     break;
 
 /**
@@ -1112,6 +1222,24 @@ case 'pipe_mark':
             $eid = (int)($_POST['enrolment_id'] ?? 0);
             if ($field === 'attendance') pipe_set_attendance($pdo, $eid, $status);
             else                         pipe_set_tasks($pdo, $eid, $status);
+        }
+        redirect('?r=pipeline&schedule_id='.$schedId);
+    }
+
+    // The online modules are worked out by the LMS, but the office has to be
+    // able to say "they did the theory here" - so this one is stamped with a
+    // name rather than just flipped.
+    if ($field === 'online_complete') {
+        $u   = current_user();
+        $who = trim((string)($u['name'] ?? $u['email'] ?? 'office'));
+        $on  = !empty($_POST['on']);
+        if (!empty($_POST['all'])) {
+            $n = pipe_set_online_all($pdo, $schedId, $on, $who);
+            $_SESSION['flash'] = $on
+                ? 'Online modules marked complete for '.$n.' student'.($n===1?'':'s').' - recorded against your name.'
+                : 'Online modules cleared for '.$n.' student'.($n===1?'':'s').'.';
+        } else {
+            pipe_set_online($pdo, (int)($_POST['enrolment_id'] ?? 0), $on, $who);
         }
         redirect('?r=pipeline&schedule_id='.$schedId);
     }

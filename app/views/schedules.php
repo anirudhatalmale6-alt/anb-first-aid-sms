@@ -82,7 +82,15 @@
   <div class="col-lg-8">
     <div class="card p-3">
       <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
-        <h6 class="fw-bold mb-0"><i class="bi bi-list-ul"></i> All schedules <span class="text-muted small">(<?= count($rows) ?>)</span></h6>
+        <h6 class="fw-bold mb-0"><i class="bi bi-list-ul"></i>
+          <?= ['today'=>"Today's classes",'week'=>'This week','students'=>'Classes with students'][$when] ?? 'All schedules' ?>
+          <span class="text-muted small">(<?= count($rows) ?>)</span></h6>
+        <div class="btn-group btn-group-sm" role="group">
+          <?php foreach (['today'=>'Today','week'=>'This week','students'=>'With students',''=>'All'] as $k=>$lbl): ?>
+            <a href="?r=schedules<?= $k ? '&when='.$k : '' ?>"
+               class="btn btn-<?= $when===$k ? 'anb' : 'outline-secondary' ?>"><?= e($lbl) ?></a>
+          <?php endforeach; ?>
+        </div>
         <div class="input-group input-group-sm" style="max-width:260px;">
           <span class="input-group-text"><i class="bi bi-search"></i></span>
           <input type="text" id="schedSearch" class="form-control" placeholder="Filter by location…" autocomplete="off">
@@ -91,7 +99,14 @@
       <div id="schedNoMatch" class="text-muted small py-2" style="display:none;">No classes at that location.</div>
 
       <?php
-      if (!$rows) { echo '<div class="text-muted small py-2">No schedules yet — create your first one on the left.</div>'; }
+      if (!$rows) {
+          echo '<div class="text-muted small py-2">'
+             . ($when === 'today'    ? 'No classes are scheduled for today.'
+             : ($when === 'week'     ? 'No classes in the last or next seven days.'
+             : ($when === 'students' ? 'No class has anybody booked into it yet.'
+             :                         'No schedules yet — create your first one on the left.')))
+             . '</div>';
+      }
       $curKey = null;
       foreach ($rows as $sc):
           $loc = $sc['location'] ?: 'No location';

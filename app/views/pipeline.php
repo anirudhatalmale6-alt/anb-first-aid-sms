@@ -54,8 +54,11 @@ function markall($schedId, $field, $label) {
 }
 $cols = ['Online','AVETMISS','USI','Paid','ID','Attend.','Tasks'];
 // count fully-ready students
-$ready = 0;
+$ready = 0; $issuedN = 0;
 foreach ($rows as $r) {
+    // Somebody who already has their certificate is not "ready to certify" -
+    // counting them kept the button offering work that was already done.
+    if (($r['status'] ?? '') === 'issued') { $issuedN++; continue; }
     // usi_verified, not usi_number - anb_generate_certificate() refuses an
     // unverified USI, so counting one as ready would offer a button that fails.
     $ok = $r['online_complete'] && $r['avetmiss_complete'] && !empty($r['usi_verified']) && $r['payment_status']==='paid'
@@ -89,6 +92,9 @@ $stamp = function ($t) { return $t ? date('j M, g:ia', strtotime($t . ' UTC')) :
   </div>
   <div class="text-end">
     <span class="badge text-bg-<?= $ready===count($rows)&&$rows?'success':'secondary' ?> fs-6"><?= $ready ?>/<?= count($rows) ?> ready to certify</span>
+    <?php if ($issuedN): ?>
+      <div class="small text-success mt-1"><i class="bi bi-award"></i> <?= (int)$issuedN ?> certificate<?= $issuedN===1?'':'s' ?> issued</div>
+    <?php endif; ?>
   </div>
 </div>
 
@@ -117,11 +123,106 @@ $stamp = function ($t) { return $t ? date('j M, g:ia', strtotime($t . ' UTC')) :
 <div class="alert alert-light border small">
   <i class="bi bi-list-check text-danger"></i>
   Every student in this class at a glance. Green = done, amber = pending, red = outstanding.
-  <strong>Click the Paid or ID dots to change them, and pick from the Attend. and Tasks
-  drop-downs</strong> — each one saves as you go. The buttons at the top of those columns do the
+  <strong>Click the Online, Paid or ID dots to change them, and pick from the Attend. and Tasks
+  drop-downs</strong> — each one saves as you go. Ticking Online by hand records your name against
+  it, for the students who did the theory in the room rather than online. The buttons at the top of those columns do the
   whole class at once. Then <strong>Sign Off</strong> to issue every certificate in one go.
   A student marked <strong>Absent</strong> or <strong>Not Yet Satisfactory</strong> is left out of
   the sign-off, which is the point — they should not receive a certificate.
+</div>
+
+<?php
+/**
+ * Website bookings arrive with a course and a payment but no class against
+ * them, so they never appear here and can never be signed off. This is the
+ * step between "they booked" and "issue their certificate".
+ */
+?>
+<div class="card p-3 mb-3">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div>
+      <h6 class="fw-bold mb-0"><i class="bi bi-person-plus text-danger"></i> Who was in the room?</h6>
+      <div class="text-muted small">
+        Add students who attended but are not on this list. Most website bookings come through
+        with the course only, so they have to be put into a class before they can be certified.
+      </div>
+    </div>
+    <?php if (!$addOpen): ?>
+      <a href="?r=pipeline&schedule_id=<?= (int)$schedule['id'] ?>&add=1" class="btn btn-outline-danger btn-sm">
+        <i class="bi bi-search"></i> Find students to add</a>
+    <?php else: ?>
+      <a href="?r=pipeline&schedule_id=<?= (int)$schedule['id'] ?>" class="btn btn-outline-secondary btn-sm">Close</a>
+    <?php endif; ?>
+  </div>
+
+  <?php if ($addOpen): ?>
+    <hr class="my-2">
+    <form method="get" class="row g-2 align-items-center mb-2">
+      <input type="hidden" name="r" value="pipeline">
+      <input type="hidden" name="schedule_id" value="<?= (int)$schedule['id'] ?>">
+      <input type="hidden" name="add" value="1">
+      <div class="col-sm-6 col-md-4">
+        <input type="text" name="q" value="<?= e($addSearch) ?>" class="form-control form-control-sm"
+               placeholder="Search by name or email">
+      </div>
+      <div class="col-auto"><button class="btn btn-sm btn-outline-secondary">Search</button></div>
+      <?php if ($addSearch !== ''): ?>
+        <div class="col-auto"><a href="?r=pipeline&schedule_id=<?= (int)$schedule['id'] ?>&add=1"
+           class="btn btn-sm btn-link text-decoration-none">Clear</a></div>
+      <?php endif; ?>
+    </form>
+
+    <?php if (!$addRows): ?>
+      <div class="text-muted small">
+        <?= $addSearch !== '' ? 'Nobody matching that is waiting to be put into a class.'
+            : 'Every booking for this course is already in a class.' ?>
+      </div>
+    <?php else: ?>
+      <form method="post" action="?r=pipe_add"
+            onsubmit="return confirm('Add the ticked students to this class?')">
+        <input type="hidden" name="schedule_id" value="<?= (int)$schedule['id'] ?>">
+        <div class="table-responsive" style="max-height:320px;overflow-y:auto;">
+          <table class="table table-sm align-middle mb-0">
+            <thead class="table-light" style="position:sticky;top:0;">
+              <tr>
+                <th style="width:32px;"><input type="checkbox" class="form-check-input"
+                    onclick="this.closest('form').querySelectorAll('.pick').forEach(c=>c.checked=this.checked)"></th>
+                <th class="small">Student</th><th class="small">Booked</th>
+                <th class="small">Paid</th><th class="small">USI</th>
+              </tr>
+            </thead>
+            <tbody>
+            <?php foreach ($addRows as $a): ?>
+              <tr>
+                <td><input type="checkbox" class="form-check-input pick" name="enrolment_id[]" value="<?= (int)$a['id'] ?>"></td>
+                <td class="small">
+                  <a href="?r=student&id=<?= (int)$a['student_id'] ?>" class="text-decoration-none fw-semibold"
+                     style="color:#2F1D3A;" target="_blank"><?= e(trim($a['first_name'].' '.$a['last_name'])) ?></a>
+                  <div class="text-muted" style="font-size:.7rem;"><?= e((string)$a['email']) ?></div>
+                </td>
+                <td class="small text-muted"><?= $a['created_at'] ? e(date('j M Y', strtotime((string)$a['created_at']))) : '' ?></td>
+                <td><?= $a['payment_status']==='paid'
+                      ? '<span class="badge text-bg-success">Paid</span>'
+                      : '<span class="badge text-bg-secondary">'.e((string)$a['payment_status']).'</span>' ?></td>
+                <td><?php if (!empty($a['usi_verified'])): ?><span class="badge text-bg-success">Verified</span>
+                    <?php elseif (trim((string)$a['usi_number']) !== ''): ?><span class="badge text-bg-warning">Not verified</span>
+                    <?php else: ?><span class="badge text-bg-danger">None</span><?php endif; ?></td>
+              </tr>
+            <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
+        <div class="d-flex justify-content-between align-items-center mt-2">
+          <div class="text-muted small">
+            <?= count($addRows) ?> booking<?= count($addRows)===1?'':'s' ?> for
+            <?= e($schedule['course_code']) ?> with no class yet<?= count($addRows) >= 300 ? ' (showing the 300 most recent — search to narrow it down)' : '' ?>.
+            Adding them puts this class's date and location on their record.
+          </div>
+          <button class="btn btn-anb btn-sm"><i class="bi bi-person-check"></i> Add to this class</button>
+        </div>
+      </form>
+    <?php endif; ?>
+  <?php endif; ?>
 </div>
 
 <div class="card p-0">
@@ -137,7 +238,8 @@ $stamp = function ($t) { return $t ? date('j M, g:ia', strtotime($t . ' UTC')) :
       </tr>
       <tr class="table-light">
         <td colspan="3"></td>
-        <td class="pipe-td" colspan="4"></td>
+        <td class="pipe-td"><?= markall($schedule['id'],'online_complete','All Done') ?></td>
+        <td class="pipe-td" colspan="3"></td>
         <td class="pipe-td"><?= markall($schedule['id'],'id_confirmed','All Sighted') ?></td>
         <td class="pipe-td">
           <form method="post" action="?r=pipe_mark" class="m-0 d-inline">
@@ -198,7 +300,14 @@ $stamp = function ($t) { return $t ? date('j M, g:ia', strtotime($t . ' UTC')) :
             <?php endif; ?>
           <?php endif; ?>
         </td>
-        <td class="pipe-td"><?= dot($r['online_complete']) ?></td>
+        <td class="pipe-td">
+          <?= markdot($schedule['id'],$r['id'],'online_complete',(bool)$r['online_complete'],
+                'Online modules complete','Online modules not finished - click if they did the theory in the room') ?>
+          <?php if (!empty($r['online_marked_by'])): ?>
+            <div class="text-warning-emphasis" style="font-size:.62rem;"
+                 title="Ticked by <?= e((string)$r['online_marked_by']) ?> on <?= e((string)$r['online_marked_at']) ?>">by hand</div>
+          <?php endif; ?>
+        </td>
         <td class="pipe-td">
           <?php
             $am    = $r['avetmiss_missing'] ?? [];
@@ -273,6 +382,14 @@ $stamp = function ($t) { return $t ? date('j M, g:ia', strtotime($t . ' UTC')) :
   <div class="d-flex justify-content-between align-items-center p-3 border-top">
     <div class="small text-muted">Only students with every box green can be certified.</div>
     <div>
+      <?php if ($unsentCerts > 0): ?>
+        <form method="post" action="?r=class_cert_email" class="d-inline"
+              onsubmit="return confirm('Email the certificate to the <?= (int)$unsentCerts ?> student(s) in this class who have not been sent one yet?')">
+          <input type="hidden" name="schedule_id" value="<?= (int)$schedule['id'] ?>">
+          <button class="btn btn-anb"><i class="bi bi-envelope-arrow-up"></i>
+            Email certificates (<?= (int)$unsentCerts ?>)</button>
+        </form>
+      <?php endif; ?>
       <button class="btn btn-outline-secondary"><i class="bi bi-arrow-repeat"></i> Refresh</button>
       <form method="post" action="?r=class_send_access" class="d-inline" onsubmit="return confirm('Send portal login access to all students in this class who have not received it yet?');">
         <input type="hidden" name="schedule_id" value="<?= (int)$schedule['id'] ?>">
@@ -288,3 +405,32 @@ $stamp = function ($t) { return $t ? date('j M, g:ia', strtotime($t . ' UTC')) :
     </div>
   </div>
 </div>
+
+<?php
+/**
+ * What is standing between each student and their certificate, in words.
+ * The dots say which box is red; this says what to do about it, and it is the
+ * same list the sign-off uses to decide who to leave out.
+ */
+if ($blockers): ?>
+<div class="card p-3 mt-3">
+  <h6 class="fw-bold mb-1"><i class="bi bi-exclamation-triangle text-warning"></i>
+    <?= count($blockers) ?> student<?= count($blockers)===1?'':'s' ?> cannot be certified yet</h6>
+  <div class="text-muted small mb-2">Sign Off skips these. Clear what is listed and they are included next time.</div>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <tbody>
+      <?php foreach ($blockers as $b): ?>
+        <tr>
+          <td class="small fw-semibold" style="width:220px;">
+            <a href="?r=student&id=<?= (int)$b['student_id'] ?>" class="text-decoration-none"
+               style="color:#2F1D3A;"><?= e($b['name']) ?></a>
+          </td>
+          <td class="small text-muted"><?= e(implode(' · ', $b['reasons'])) ?></td>
+        </tr>
+      <?php endforeach; ?>
+      </tbody>
+    </table>
+  </div>
+</div>
+<?php endif; ?>
